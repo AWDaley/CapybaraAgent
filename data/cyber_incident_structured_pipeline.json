@@ -1,0 +1,101 @@
+{
+  "pipeline_id": "cyber_incident_pipeline_01",
+  "title": "Enterprise Attack Graph Analysis and Incident Response Pipeline",
+  "global_context": {
+    "incident_id": "#INC-8821",
+    "zones": {
+      "DMZ": ["DMZ_PROXY", "DMZ_WEB_01", "DMZ_WEB_02", "DMZ_API"],
+      "INTERNAL": ["APP_SRV_01", "APP_SRV_02", "AUTH_SRV", "LOG_SRV"],
+      "SECURE_CORE": ["CORE_DB_01", "CORE_DB_02", "VAULT_01", "BACKUP_SRV"]
+    }
+  },
+  "pipeline": [
+    {
+      "step_id": "step_1_topology",
+      "specialist": "coder",
+      "objective": "Construct the 12-node enterprise network graph in python_repl (using networkx: 'import networkx as nx; G = nx.DiGraph()' or a dict). Store the graph in REPL as 'G'. Ensure all 12 nodes across DMZ (4), INTERNAL (4), and SECURE_CORE (4) zones are present.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs": {
+        "start_node": "DMZ_WEB_01",
+        "target_node": "CORE_DB_01"
+      },
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "G",
+          "assertion": "len(G.nodes if hasattr(G, 'nodes') else (G.get('nodes') if isinstance(G, dict) and 'nodes' in G else G)) == 12"
+        }
+      ],
+      "max_retries": 2
+    },
+    {
+      "step_id": "step_2_traversal",
+      "specialist": "coder",
+      "objective": "Using python_repl and the existing 12-node graph 'G' from Step 1, compute the shortest path from 'DMZ_WEB_01' to 'CORE_DB_01'. Do NOT redefine or shrink 'G'. Store only the traversal dictionary in REPL as 'attack_analysis' containing 'shortest_path', 'hops', 'blast_radius', and 'choke_point'.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "attack_analysis",
+          "assertion": "'shortest_path' in attack_analysis or 'path' in attack_analysis"
+        }
+      ],
+      "max_retries": 2
+    },
+    {
+      "step_id": "step_3_export_json",
+      "specialist": "harness",
+      "objective": "Deterministically materialize 'incident_graph_data.json' from REPL graph 'G' and 'attack_analysis'.",
+      "output_spec": {
+        "spec_type": "repl_template",
+        "target_file": "incident_graph_data.json",
+        "template": {
+          "metadata": {
+            "incident_id": "#INC-8821",
+            "analysis_type": "network_attack_assessment",
+            "version": "1.0"
+          },
+          "nodes": "$eval:list(G.nodes(data=True)) if hasattr(G, 'nodes') else (G.get('nodes', G) if isinstance(G, dict) else G)",
+          "edges": "$eval:list(G.edges(data=True)) if hasattr(G, 'edges') else (G.get('edges', []) if isinstance(G, dict) else [])",
+          "attack_paths": "$eval:attack_analysis.get('paths', attack_analysis.get('shortest_path', []))",
+          "blast_radius_analysis": "$eval:attack_analysis.get('blast_radius', {})",
+          "choke_point_analysis": "$eval:attack_analysis.get('choke_point', {})"
+        }
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "incident_graph_data.json",
+          "required_keys": ["metadata", "nodes", "edges", "attack_paths", "blast_radius_analysis"],
+          "min_items": {
+            "nodes": 8
+          }
+        }
+      ],
+      "max_retries": 1
+    },
+    {
+      "step_id": "step_4_synthesize_report",
+      "specialist": "general",
+      "objective": "Read 'incident_graph_data.json' with read_file and generate 'incident_response_report.md' with write_file detailing Incident ID (#INC-8821), Initial Compromise Vector (DMZ_WEB_01), Shortest Attack Path, Total Path Exploitability Score, Impacted Nodes in Blast Radius, and Recommended Firewall Isolation Rule. Explicitly write out the report to 'incident_response_report.md' including node entity names.",
+      "inputs_from_step": "step_3_export_json",
+      "tool_allowlist": ["read_file", "write_file"],
+      "verification_criteria": [
+        {
+          "type": "file_exists",
+          "path": "incident_response_report.md",
+          "min_size": 200
+        },
+        {
+          "type": "cross_entity",
+          "source_json": "incident_graph_data.json",
+          "target_file": "incident_response_report.md",
+          "entity_key": "nodes",
+          "entity_id_field": "id",
+          "min_match_ratio": 0.5
+        }
+      ],
+      "max_retries": 2
+    }
+  ]
+}

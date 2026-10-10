@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-events-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "run_id", "sequence", "state_version", "event_type", "timestamp", "manifest_hash", "previous_hash", "event_hash", "payload"],
+  "properties": {
+    "event_id": {"type": "string", "pattern": "^event:[a-z0-9._-]+$"},
+    "run_id": {"type": "string", "pattern": "^run:[a-z0-9._-]+$"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "state_version": {"type": "integer", "minimum": 0},
+    "event_type": {"enum": ["manifest.created", "manifest.validated", "capability.computed", "model.proposal_received", "proposal.rejected", "tool.intent_recorded", "tool.succeeded", "tool.failed", "tool.reconciled", "observation.recorded", "approval.requested", "approval.granted", "approval.denied", "lifecycle.process_restored", "lifecycle.permission_revoked", "completion.proposed", "completion.verified", "run.completed", "run.escalated", "run.cancelled"]},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "manifest_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "previous_hash": {"type": "string", "pattern": "^(|sha256:[a-f0-9]{64})$"},
+    "event_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "payload": {"type": "object", "additionalProperties": false, "properties": {"reference_id": {"type": "string", "maxLength": 160}, "reason_code": {"type": "string", "maxLength": 160}, "observation_type": {"type": "string", "maxLength": 160}, "idempotency_key": {"type": "string", "maxLength": 160}, "status": {"type": "string", "maxLength": 64}}, "required": []}
+  }
+}

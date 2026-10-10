@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-state-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "manifest_hash", "ledger_sequence", "state_version", "phase", "remaining_budget", "pending_approval_id", "pending_effect_key", "terminal_outcome"],
+  "properties": {
+    "run_id": {"type": "string", "pattern": "^run:[a-z0-9._-]+$"},
+    "manifest_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "ledger_sequence": {"type": "integer", "minimum": 0},
+    "state_version": {"type": "integer", "minimum": 0},
+    "phase": {"enum": ["created", "validating", "ready", "reasoning", "acting", "waiting_for_tool", "waiting_for_information", "waiting_for_approval", "verifying", "completed", "escalated", "cancelled", "failed"]},
+    "remaining_budget": {"type": "object", "additionalProperties": false, "required": ["model_calls", "tool_calls", "time_millis", "context_tokens", "output_tokens", "external_actions"], "properties": {"model_calls": {"type": "integer", "minimum": 0}, "tool_calls": {"type": "integer", "minimum": 0}, "time_millis": {"type": "integer", "minimum": 0}, "context_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}, "external_actions": {"type": "integer", "minimum": 0}}},
+    "pending_approval_id": {"type": ["string", "null"], "pattern": "^approval:[a-z0-9._-]+$"},
+    "pending_effect_key": {"type": ["string", "null"], "maxLength": 160},
+    "terminal_outcome": {"type": ["string", "null"], "enum": ["answer_delivered", "summary_delivered", "draft_saved", "task_list_saved", "escalated", "cancelled", null]}
+  }
+}

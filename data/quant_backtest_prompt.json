@@ -1,0 +1,4 @@
+{
+  "title": "Quantitative Trading Backtest & Risk Analysis Pipeline",
+  "prompt": "Execute an end-to-end quantitative trading backtest and risk analysis pipeline: 1. Use python_repl to generate a 30-day synthetic price series for asset 'CAPY' (starting at $100.00 with deterministic daily percentage returns using math and statistics, seed=42) and simulate a Dual Moving Average (SMA-5 vs SMA-15) crossover trading strategy. 2. Save the full 30-day chronological trade log and daily portfolio balances into 'trading_log.json'. 3. Compute quantitative performance metrics (Cumulative Return %, Maximum Drawdown %, Sharpe Ratio with 3% risk-free rate, and Total Trades Executed) and write a formatted performance report table into 'performance_summary.md'. 4. Read back both 'trading_log.json' and 'performance_summary.md' to verify file integrity and assert that exactly 30 daily records and 4 key risk metrics were produced."
+}

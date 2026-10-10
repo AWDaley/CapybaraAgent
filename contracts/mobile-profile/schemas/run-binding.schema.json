@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-run-binding-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_binding_version", "manifest_hash", "policy_bundle_id", "policy_bundle_hash", "model_profile_id", "model_artifact_hash", "platform", "os_version", "device_profile_id", "network_mode", "created_at"],
+  "properties": {
+    "run_binding_version": {"const": "0.1.0"},
+    "manifest_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "policy_bundle_id": {"const": "tal-mobile-policy-bundle-0.1.0"},
+    "policy_bundle_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "model_profile_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "model_artifact_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "platform": {"const": "android"},
+    "os_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "device_profile_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "network_mode": {"const": "local_only"},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

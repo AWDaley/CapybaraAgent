@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-action-preview-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["preview_id", "manifest_hash", "state_version", "goal", "data_used", "action", "external_recipients", "information_disclosed", "information_not_disclosed", "reversibility", "verification", "authentication"],
+  "properties": {
+    "preview_id": {"type": "string", "pattern": "^preview:[a-z0-9._-]+$"},
+    "manifest_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "state_version": {"type": "integer", "minimum": 0},
+    "goal": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "data_used": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+    "action": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "external_recipients": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+    "information_disclosed": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+    "information_not_disclosed": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+    "reversibility": {"enum": ["reversible", "requires_reconciliation", "irreversible"]},
+    "verification": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "authentication": {"enum": ["none", "device_credential", "biometric_strong"]}
+  }
+}

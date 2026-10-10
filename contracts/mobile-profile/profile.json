@@ -1,0 +1,25 @@
+{
+  "profile_id": "tal.mobile.secure_assistant-0.1.0",
+  "tal_core_compatibility": "0.3.x",
+  "grammar_id": "tal-core-0.3.0",
+  "manifest_schema_id": "tal-manifest-0.3.0",
+  "canonicalization_id": "tal-json-c14n-0.2",
+  "context_profile_id": "tal-mobile-context-0.1.0",
+  "policy_bundle_id": "tal-mobile-policy-bundle-0.1.0",
+  "tool_catalog_id": "tal-mobile-tools-0.1.0",
+  "event_schema_id": "tal-mobile-events-0.1.0",
+  "conformance_suite_id": "tal-mobile-conformance-0.1.0",
+  "default_network_mode": "local_only",
+  "supported_network_modes": [
+    "local_only",
+    "ask_before_cloud",
+    "managed_hybrid"
+  ],
+  "production_constraints": {
+    "allows_dynamic_extensions": false,
+    "allows_unregistered_tools": false,
+    "allows_unverified_completion": false,
+    "allows_background_reasoning": false,
+    "allows_direct_model_tool_execution": false
+  }
+}

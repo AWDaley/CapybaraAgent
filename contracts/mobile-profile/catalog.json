@@ -1,0 +1,116 @@
+{
+  "catalog_id": "tal-mobile-tools-0.1.0",
+  "domain_pack_id": "tal.mobile.private_assistant-0.1.0",
+  "risk_tiers": [
+    {
+      "tier": 0,
+      "id": "local_reasoning",
+      "requires_fresh_approval": false,
+      "mvp_allowed": true
+    },
+    {
+      "tier": 1,
+      "id": "scoped_read",
+      "requires_fresh_approval": false,
+      "mvp_allowed": true
+    },
+    {
+      "tier": 2,
+      "id": "reversible_local_write",
+      "requires_fresh_approval": true,
+      "mvp_allowed": true
+    },
+    {
+      "tier": 3,
+      "id": "external_side_effect",
+      "requires_fresh_approval": true,
+      "mvp_allowed": false
+    },
+    {
+      "tier": 4,
+      "id": "high_impact_effect",
+      "requires_fresh_approval": true,
+      "mvp_allowed": false
+    }
+  ],
+  "tools": [
+    {
+      "tool_id": "document.selected.read",
+      "version": "1.0.0",
+      "effect": "read",
+      "risk_tier": 1,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "image.selected.inspect",
+      "version": "1.0.0",
+      "effect": "read",
+      "risk_tier": 1,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "vault.search",
+      "version": "1.0.0",
+      "effect": "read",
+      "risk_tier": 1,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "draft.create",
+      "version": "1.0.0",
+      "effect": "local_write",
+      "risk_tier": 2,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "note.create",
+      "version": "1.0.0",
+      "effect": "local_write",
+      "risk_tier": 2,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "task.create_local",
+      "version": "1.0.0",
+      "effect": "local_write",
+      "risk_tier": 2,
+      "mvp_enabled": true
+    },
+    {
+      "tool_id": "calendar.availability.read",
+      "version": "1.0.0",
+      "effect": "read",
+      "risk_tier": 1,
+      "mvp_enabled": false
+    },
+    {
+      "tool_id": "cloud_model.request",
+      "version": "1.0.0",
+      "effect": "network",
+      "risk_tier": 3,
+      "mvp_enabled": false
+    }
+  ],
+  "task_templates": [
+    {
+      "template_id": "document.answer_with_evidence",
+      "success_condition_id": "answer_package_released",
+      "mvp_enabled": true
+    },
+    {
+      "template_id": "document.summary",
+      "success_condition_id": "summary_package_released",
+      "mvp_enabled": true
+    },
+    {
+      "template_id": "task.extract_local",
+      "success_condition_id": "task_list_committed",
+      "mvp_enabled": true
+    },
+    {
+      "template_id": "draft.create_local",
+      "success_condition_id": "local_draft_committed",
+      "mvp_enabled": true
+    }
+  ]
+}

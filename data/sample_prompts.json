@@ -1,0 +1,24 @@
+{
+  "prompts": [
+    {
+      "id": "prime_sum_report",
+      "title": "Prime Numbers (1-50) & Report Generation",
+      "prompt": "Use python_repl to generate all prime numbers between 1 and 50 and compute their sum. Then save a formatted summary table to primes_report.txt and confirm the file contents."
+    },
+    {
+      "id": "fibonacci_calc",
+      "title": "Fibonacci Sequence Calculation",
+      "prompt": "Create a Python script named fibonacci.py that calculates the first 10 Fibonacci numbers, prints them, and saves the sequence to fibonacci.txt."
+    },
+    {
+      "id": "orbital_simulation_benchmark",
+      "title": "JWST vs Hubble Orbital Telemetry Simulation",
+      "prompt": "Conduct an end-to-end data analysis and benchmarking pipeline: 1. Research the latest orbital parameters (apogee, perigee, inclination, orbital period) of the James Webb Space Telescope (JWST) and the Hubble Space Telescope (HST). 2. Use python_repl to model a 10-day orbital simulation comparing their altitude fluctuations and orbital speeds, accounting for standard gravitational parameters. 3. Generate a structured JSON dataset saved to 'orbit_telemetry.json' containing 24 data points per day for both telescopes. 4. From the dataset, compute statistical aggregates (mean altitude, max speed, total distance traversed) and write a formatted comparison table into 'telescope_comparison.md'. 5. Read back both 'orbit_telemetry.json' and 'telescope_comparison.md' to verify file integrity and assert that total calculated telemetry points equal exactly 480."
+    },
+    {
+      "id": "tokyo_attractions_research",
+      "title": "Tokyo Attractions Research & Currency Conversion",
+      "prompt": "Research the top 3 family attractions in Tokyo with entrance fees, convert the prices from JPY to USD, and generate a markdown table comparison."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Environment and secrets
+.env
+.env.local
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Local agent state and generated deliverables
+data/sessions/
+data/tal_reports/
+data/tal_tests/
+workspace/
+
+# IDE
+.vscode/
+.idea/
+mobile/.gradle/
+mobile/.android-sdk/
+mobile/.android-commandlinetools.zip
+mobile/local.properties
+mobile/**/build/
+*.apk
+*.aab
+
+# OS
+Thumbs.db
+.DS_Store

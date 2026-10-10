@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-approval-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["approval_id", "manifest_hash", "manifest_version", "state_version", "action_id", "target_ref", "arguments_hash", "approver_ref", "authentication_strength", "issued_at", "expires_at", "decision"],
+  "properties": {
+    "approval_id": {"type": "string", "pattern": "^approval:[a-z0-9._-]+$"},
+    "manifest_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "manifest_version": {"const": 1},
+    "state_version": {"type": "integer", "minimum": 0},
+    "action_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "target_ref": {"type": "string", "minLength": 1, "maxLength": 160},
+    "arguments_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "approver_ref": {"type": "string", "minLength": 1, "maxLength": 160},
+    "authentication_strength": {"enum": ["none", "device_credential", "biometric_strong"]},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "decision": {"enum": ["approved", "denied", "expired", "revoked"]}
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "fixture_id": "document-answer-replay-v1",
+  "run_id": "run:document-answer-1",
+  "manifest_hash": "sha256:a3f54e23eff820caee82c2439583ae6166514459ce729f6a82a7ce35608816c5",
+  "events": [
+    {"event_type": "manifest.created", "payload": {"reference_id": "manifest:document-answer-1"}},
+    {"event_type": "manifest.validated", "payload": {"reference_id": "manifest:document-answer-1"}},
+    {"event_type": "capability.computed", "payload": {"reference_id": "capability:document-read"}},
+    {"event_type": "model.proposal_received", "payload": {"reference_id": "proposal:read-document-1"}},
+    {"event_type": "tool.intent_recorded", "payload": {"idempotency_key": "effect:read-document-1", "semantic_fingerprint": "sha256:read-document-1"}},
+    {"event_type": "tool.succeeded", "payload": {"idempotency_key": "effect:read-document-1"}},
+    {"event_type": "observation.recorded", "payload": {"observation_id": "observation:document-span-1"}},
+    {"event_type": "completion.proposed", "payload": {"reference_id": "proposal:complete-1"}},
+    {"event_type": "completion.verified", "payload": {"outcome": "answer_delivered"}}
+  ],
+  "expected_state": {
+    "ledger_sequence": 9,
+    "state_version": 9,
+    "phase": "completed",
+    "pending_approval_id": null,
+    "pending_effect_key": null,
+    "observations": ["observation:document-span-1"],
+    "terminal_outcome": "answer_delivered"
+  }
+}

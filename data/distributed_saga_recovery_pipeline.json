@@ -1,0 +1,280 @@
+{
+  "pipeline_id": "distributed_saga_recovery_pipeline_01",
+  "title": "Distributed Order Saga, Hash-Chain Audit, and Fault-Recovery Pipeline",
+  "global_context": {
+    "incident_id": "#INC-1107",
+    "scenario": "A distributed order workflow must be simulated, audited, fault-injected, and recovered without double-charging or losing inventory.",
+    "currency": "USD",
+    "services": [
+      {"id": "API_GATEWAY", "zone": "EDGE", "criticality": "high"},
+      {"id": "ORDER_SVC", "zone": "TRANSACTION", "criticality": "critical"},
+      {"id": "INVENTORY_SVC", "zone": "TRANSACTION", "criticality": "critical"},
+      {"id": "PAYMENT_SVC", "zone": "TRANSACTION", "criticality": "critical"},
+      {"id": "SHIPPING_SVC", "zone": "TRANSACTION", "criticality": "high"},
+      {"id": "NOTIFY_SVC", "zone": "TRANSACTION", "criticality": "medium"},
+      {"id": "ORDER_DB", "zone": "DATA", "criticality": "critical"},
+      {"id": "INVENTORY_DB", "zone": "DATA", "criticality": "critical"},
+      {"id": "PAYMENT_LEDGER", "zone": "DATA", "criticality": "critical"},
+      {"id": "EVENT_BUS", "zone": "PLATFORM", "criticality": "high"},
+      {"id": "SAGA_ORCHESTRATOR", "zone": "PLATFORM", "criticality": "critical"},
+      {"id": "AUDIT_STORE", "zone": "PLATFORM", "criticality": "high"}
+    ],
+    "orders": [
+      {"order_id": "ORD-2001", "customer": "C-101", "amount": 125.50},
+      {"order_id": "ORD-2002", "customer": "C-102", "amount": 80.00},
+      {"order_id": "ORD-2003", "customer": "C-103", "amount": 240.75},
+      {"order_id": "ORD-2004", "customer": "C-104", "amount": 19.99},
+      {"order_id": "ORD-2005", "customer": "C-105", "amount": 510.25}
+    ],
+    "fault_injection": {
+      "order_id": "ORD-2003",
+      "failed_event_type": "PAYMENT_FAILED",
+      "duplicate_event_type": "PAYMENT_FAILED_REPLAY"
+    },
+    "expected_counts": {
+      "services": 12,
+      "orders": 5,
+      "canonical_events": 26,
+      "successful_orders": 4,
+      "cancelled_orders": 1
+    }
+  },
+  "max_steps": 70,
+  "max_time_seconds": 3600,
+  "pipeline": [
+    {
+      "step_id": "step_1_build_service_model",
+      "specialist": "coder",
+      "objective": "Use python_repl to create the deterministic service inventory and directed dependency graph for the distributed order system. Do not use networkx, external packages, open(), or filesystem I/O. Store the 12 service dictionaries from global_context in REPL as 'service_nodes' and store a dict named 'service_graph' with exactly these 12 keys and these directed edges: API_GATEWAY -> ORDER_SVC; ORDER_SVC -> INVENTORY_SVC, PAYMENT_SVC, ORDER_DB, SAGA_ORCHESTRATOR; INVENTORY_SVC -> INVENTORY_DB, EVENT_BUS; PAYMENT_SVC -> PAYMENT_LEDGER, EVENT_BUS; SHIPPING_SVC -> EVENT_BUS; NOTIFY_SVC -> EVENT_BUS; SAGA_ORCHESTRATOR -> ORDER_SVC, EVENT_BUS, AUDIT_STORE; EVENT_BUS -> SHIPPING_SVC, NOTIFY_SVC, AUDIT_STORE; ORDER_DB -> AUDIT_STORE; INVENTORY_DB -> AUDIT_STORE; PAYMENT_LEDGER -> AUDIT_STORE; AUDIT_STORE -> []. The adjacency dict must include AUDIT_STORE as an explicit leaf key with an empty list. Preserve service IDs exactly. Assign 'service_nodes' as a list of 12 dicts with id, zone, and criticality fields, and 'service_graph' as an adjacency dict whose values are lists of target IDs.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs": {
+        "incident_id": "#INC-1107",
+        "service_count": 12,
+        "order_count": 5
+      },
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "service_nodes",
+          "assertion": "len(service_nodes) == 12"
+        },
+        {
+          "type": "repl_graph",
+          "variable": "service_graph",
+          "expected_graph": {
+            "API_GATEWAY": ["ORDER_SVC"],
+            "ORDER_SVC": ["INVENTORY_SVC", "PAYMENT_SVC", "ORDER_DB", "SAGA_ORCHESTRATOR"],
+            "INVENTORY_SVC": ["INVENTORY_DB", "EVENT_BUS"],
+            "PAYMENT_SVC": ["PAYMENT_LEDGER", "EVENT_BUS"],
+            "SHIPPING_SVC": ["EVENT_BUS"],
+            "NOTIFY_SVC": ["EVENT_BUS"],
+            "SAGA_ORCHESTRATOR": ["ORDER_SVC", "EVENT_BUS", "AUDIT_STORE"],
+            "EVENT_BUS": ["SHIPPING_SVC", "NOTIFY_SVC", "AUDIT_STORE"],
+            "ORDER_DB": ["AUDIT_STORE"],
+            "INVENTORY_DB": ["AUDIT_STORE"],
+            "PAYMENT_LEDGER": ["AUDIT_STORE"],
+            "AUDIT_STORE": []
+          }
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 8,
+      "state_exports": ["service_nodes", "service_graph"]
+    },
+    {
+      "step_id": "step_2_simulate_order_sagas",
+      "specialist": "coder",
+      "objective": "Using the existing 'service_nodes' and 'service_graph' plus the five orders in global_context, simulate the canonical order saga in python_repl. Do not recreate or overwrite the service graph and do not use filesystem I/O. Store the order list as 'orders' and create a list named 'ledger_events' with exactly 26 event dictionaries in deterministic order. For ORD-2001, ORD-2002, ORD-2004, and ORD-2005 emit five events each, in this order: ORDER_ACCEPTED, INVENTORY_RESERVED, PAYMENT_CAPTURED, SHIPMENT_CREATED, CUSTOMER_NOTIFIED. For ORD-2003 emit six events, in this order: ORDER_ACCEPTED, INVENTORY_RESERVED, PAYMENT_FAILED, INVENTORY_RELEASED, ORDER_CANCELLED, CUSTOMER_NOTIFIED. Every event must contain event_id, order_id, event_type, status, and sequence. Use status 'COMMITTED' for successful events, 'FAILED' for PAYMENT_FAILED, and 'COMPENSATED' for INVENTORY_RELEASED and ORDER_CANCELLED. Use unique event IDs except that the failed payment must be exactly 'EVT-2003-PAYMENT-FAIL'. Build a tamper-evident SHA-256 hash chain without third-party packages: canonicalize each event excluding event_hash with json.dumps(..., sort_keys=True, separators=(',', ':')), hash previous_hash + canonical event text with hashlib.sha256, and add previous_hash and event_hash to each event. Start previous_hash at 64 zeroes and store the final hash as 'ledger_root_hash'. Also store 'workflow_metrics' with total_orders 5, successful_orders 4, cancelled_orders 1, event_count 26, and duplicate_events_ignored 0. Print concise counts and the root hash.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs_from_step": "step_1_build_service_model",
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "ledger_events",
+          "assertion": "len(ledger_events) == 26"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "workflow_metrics",
+          "assertion": "workflow_metrics.get('successful_orders') == 4 and workflow_metrics.get('cancelled_orders') == 1 and workflow_metrics.get('event_count') == 26"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "ledger_root_hash",
+          "assertion": "len(ledger_root_hash) == 64"
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 10,
+      "state_exports": ["orders", "ledger_events", "ledger_root_hash", "workflow_metrics"]
+    },
+    {
+      "step_id": "step_3_verify_hash_chain_and_invariants",
+      "specialist": "coder",
+      "objective": "Independently audit the existing 'ledger_events' in python_repl without changing them. Recompute every SHA-256 link from the 64-zero initial hash, verify each previous_hash, event_hash, sequence, and the final ledger_root_hash. Verify business invariants: exactly five distinct orders, four orders reach CUSTOMER_NOTIFIED after PAYMENT_CAPTURED, ORD-2003 contains PAYMENT_FAILED followed by both compensation events, and the event count equals 26. Store a dictionary named 'integrity_audit' with boolean keys hash_chain_valid, sequence_valid, business_invariants_valid, and valid; integer event_count; string root_hash; and a list named checks containing the check names. Set all four booleans to True only if the independent recomputation passes. Do not use open(), do not silently replace failed values with True, and print the audit result.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs_from_step": "step_2_simulate_order_sagas",
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "integrity_audit",
+          "assertion": "integrity_audit.get('hash_chain_valid') is True and integrity_audit.get('sequence_valid') is True and integrity_audit.get('business_invariants_valid') is True and integrity_audit.get('valid') is True"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "integrity_audit",
+          "assertion": "integrity_audit.get('event_count') == 26 and integrity_audit.get('root_hash') == ledger_root_hash"
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 10,
+      "state_exports": ["integrity_audit"]
+    },
+    {
+      "step_id": "step_4_inject_failure_and_test_idempotent_recovery",
+      "specialist": "coder",
+      "objective": "Using the existing canonical ledger, simulate fault recovery in python_repl without mutating 'ledger_events'. The injected fault is a replay of the existing failed-payment event for ORD-2003: create 'retry_event' with the same event_id 'EVT-2003-PAYMENT-FAIL', event_type 'PAYMENT_FAILED_REPLAY', and status 'IGNORED_DUPLICATE'. Detect the duplicate by event_id before appending anything. Create 'compensation_journal' with two applied entries for ORD-2003: INVENTORY_RELEASE and ORDER_CANCELLED. Store 'recovery_audit' with failure_injected True, duplicate_event_id 'EVT-2003-PAYMENT-FAIL', duplicate_suppressed True, replay_event_count 1, compensation_count 2, recovered_state 'CANCELLED', and recovery_valid True only when the duplicate was suppressed, the compensation count is 2, the canonical ledger still has 26 events, and ORD-2003 remains cancelled. Also store 'recovery_events' as a separate list containing the original ledger events plus the ignored retry event, and do not change the original hash chain. Print the recovery decision and remaining canonical event count.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs_from_step": "step_3_verify_hash_chain_and_invariants",
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "recovery_audit",
+          "assertion": "recovery_audit.get('failure_injected') is True and recovery_audit.get('duplicate_suppressed') is True and recovery_audit.get('compensation_count') == 2"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "recovery_audit",
+          "assertion": "recovery_audit.get('recovered_state') == 'CANCELLED' and recovery_audit.get('recovery_valid') is True"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "ledger_events",
+          "assertion": "len(ledger_events) == 26"
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 10,
+      "state_exports": ["recovery_audit", "recovery_events", "compensation_journal"]
+    },
+    {
+      "step_id": "step_5_export_execution_audit",
+      "specialist": "harness",
+      "objective": "Deterministically materialize 'saga_execution_audit.json' from the verified REPL state with zero LLM calls. Include metadata, the full service inventory, service dependency graph, orders, canonical ledger events, workflow metrics, ledger root hash, integrity audit, and recovery audit.",
+      "output_spec": {
+        "spec_type": "repl_template",
+        "target_file": "saga_execution_audit.json",
+        "template": {
+          "metadata": {
+            "incident_id": "#INC-1107",
+            "scenario": "distributed_order_saga",
+            "schema_version": "1.0"
+          },
+          "services": "$eval:service_nodes",
+          "service_graph": "$eval:service_graph",
+          "orders": "$eval:orders",
+          "ledger_events": "$eval:ledger_events",
+          "workflow_metrics": "$eval:workflow_metrics",
+          "ledger_root_hash": "$eval:ledger_root_hash",
+          "integrity_audit": "$eval:integrity_audit",
+          "recovery_audit": "$eval:recovery_audit"
+        }
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "saga_execution_audit.json",
+          "required_keys": [
+            "metadata",
+            "services",
+            "service_graph",
+            "orders",
+            "ledger_events",
+            "workflow_metrics",
+            "ledger_root_hash",
+            "integrity_audit",
+            "recovery_audit"
+          ],
+          "min_items": {
+            "services": 12,
+            "orders": 5,
+            "ledger_events": 26
+          },
+          "min_size": 4000
+        }
+      ],
+      "max_retries": 1,
+      "max_steps": 4
+    },
+    {
+      "step_id": "step_6_reconcile_release_checks",
+      "specialist": "coder",
+      "objective": "Perform a second independent reconciliation in python_repl after the JSON export. Do not read or write files. Compare len(ledger_events) with workflow_metrics['event_count']; compare successful_orders + cancelled_orders with total_orders; compare ledger_root_hash with integrity_audit['root_hash']; require integrity_audit['valid'] and recovery_audit['recovery_valid']; and require exactly 12 service nodes and 5 orders. Store 'release_manifest' with release_ready True only when every check passes, a list 'blocking_issues' that is empty when ready, a dictionary 'checks' containing each named boolean check, and an 'artifact_contract' dictionary mapping json to 'saga_execution_audit.json', manifest to 'saga_release_manifest.json', and report to 'saga_execution_report.md'. Print every check and the final release decision.",
+      "tool_allowlist": ["python_repl", "calc"],
+      "inputs_from_step": "step_5_export_execution_audit",
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "release_manifest",
+          "assertion": "release_manifest.get('release_ready') is True and len(release_manifest.get('blocking_issues', [])) == 0"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "release_manifest",
+          "assertion": "len(release_manifest.get('checks', {})) >= 5"
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 8,
+      "state_exports": ["release_manifest"]
+    },
+    {
+      "step_id": "step_7_export_release_manifest",
+      "specialist": "harness",
+      "objective": "Deterministically materialize 'saga_release_manifest.json' from the verified REPL variable 'release_manifest' with zero LLM calls.",
+      "output_spec": {
+        "spec_type": "repl_variable",
+        "target_file": "saga_release_manifest.json",
+        "source_variable": "release_manifest"
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "saga_release_manifest.json",
+          "required_keys": ["release_ready", "blocking_issues", "checks", "artifact_contract"],
+          "min_items": {
+            "checks": 5,
+            "artifact_contract": 3
+          },
+          "min_size": 400
+        }
+      ],
+      "max_retries": 1,
+      "max_steps": 4
+    },
+    {
+      "step_id": "step_8_write_final_report",
+      "specialist": "coder",
+      "objective": "Read both 'saga_execution_audit.json' and 'saga_release_manifest.json' with read_file, then use write_file to create 'saga_execution_report.md'. The report must be at least 1200 bytes and include: incident ID #INC-1107; scenario and scope; a complete service inventory naming all 12 services exactly (API_GATEWAY, ORDER_SVC, INVENTORY_SVC, PAYMENT_SVC, SHIPPING_SVC, NOTIFY_SVC, ORDER_DB, INVENTORY_DB, PAYMENT_LEDGER, EVENT_BUS, SAGA_ORCHESTRATOR, AUDIT_STORE); the dependency-flow summary; all five order IDs and amounts; canonical event count 26; successful/cancelled order counts; the ledger_root_hash; independent hash-chain and business-invariant results; the injected duplicate event ID EVT-2003-PAYMENT-FAIL; the idempotent suppression result; both compensation actions; release_ready status; and the three artifact filenames. Explain why the failed order remains CANCELLED and why replaying the same event ID must not charge or reserve inventory again. Explicitly write the complete Markdown report to 'saga_execution_report.md' and then read it back to confirm it is non-empty.",
+      "inputs_from_step": "step_7_export_release_manifest",
+      "tool_allowlist": ["read_file", "write_file"],
+      "verification_criteria": [
+        {
+          "type": "file_exists",
+          "path": "saga_execution_report.md",
+          "min_size": 1200
+        },
+        {
+          "type": "cross_entity",
+          "source_json": "saga_execution_audit.json",
+          "target_file": "saga_execution_report.md",
+          "entity_key": "services",
+          "entity_id_field": "id",
+          "min_match_ratio": 1.0
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 8
+    }
+  ]
+}

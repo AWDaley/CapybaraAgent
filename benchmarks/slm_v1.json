@@ -1,0 +1,39 @@
+{
+  "suite_id": "capybara_slm_core",
+  "version": "v1",
+  "description": "Versioned SLM-first benchmark suite covering tool use, verification, recovery, and long-horizon task decomposition.",
+  "cases": [
+    {
+      "case_id": "deterministic_calculation",
+      "category": "tool_use",
+      "difficulty": "easy",
+      "prompt": "Use the calculator tool to compute (184 * 37) - 95. State the result.",
+      "acceptance": "The final answer contains the exact calculated value.",
+      "tags": ["calculator", "structured_action"]
+    },
+    {
+      "case_id": "verified_python_state",
+      "category": "structured_state",
+      "difficulty": "medium",
+      "prompt": "Use python_repl to create a list named benchmark_numbers containing the squares of 1 through 10, then report its length and final value.",
+      "acceptance": "The REPL state contains ten deterministic values and the response reports the expected length and final value.",
+      "tags": ["python_repl", "state", "verification"]
+    },
+    {
+      "case_id": "diagnostic_repair",
+      "category": "recovery",
+      "difficulty": "hard",
+      "prompt": "Create a small Python data transformation in python_repl, verify its output is a dictionary with keys total and average, and repair any syntax or schema error before completing.",
+      "acceptance": "Completion follows a successful deterministic state check after any required repair.",
+      "tags": ["repair", "schema", "python_repl"]
+    },
+    {
+      "case_id": "distributed_saga_recovery",
+      "category": "long_horizon_pipeline",
+      "difficulty": "endurance",
+      "prompt": "Execute the distributed order saga, hash-chain audit, and fault-recovery workflow using small verified steps. Preserve canonical state, suppress duplicate recovery events, and emit verified artifacts.",
+      "acceptance": "All pipeline stages and artifact contracts pass; the canonical ledger remains intact after duplicate suppression.",
+      "tags": ["pipeline", "checkpoint", "recovery", "regression"]
+    }
+  ]
+}

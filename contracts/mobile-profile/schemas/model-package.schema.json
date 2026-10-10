@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-model-package-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["package_id", "publisher_id", "artifact_hash", "model_profile_id", "model_version", "quantization", "tokenizer_hash", "runtime_id", "prompt_profile_id", "certification_id", "minimum_android_api", "supported_abis", "issued_at", "expires_at", "signature"],
+  "properties": {
+    "package_id": {"type": "string", "pattern": "^package:[a-z0-9._-]+$"},
+    "publisher_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "artifact_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "model_profile_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "model_version": {"type": "string", "minLength": 1, "maxLength": 160},
+    "quantization": {"type": "string", "minLength": 1, "maxLength": 64},
+    "tokenizer_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "runtime_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "prompt_profile_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "certification_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "minimum_android_api": {"type": "integer", "minimum": 28, "maximum": 99},
+    "supported_abis": {"type": "array", "minItems": 1, "items": {"enum": ["arm64-v8a"]}},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "revoked": {"type": "boolean"},
+    "signature": {"type": "string", "minLength": 32, "maxLength": 8192}
+  }
+}

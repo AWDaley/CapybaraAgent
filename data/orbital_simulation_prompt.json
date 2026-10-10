@@ -1,0 +1,4 @@
+{
+  "title": "JWST vs Hubble Orbital Simulation & Verification Pipeline",
+  "prompt": "Conduct an end-to-end data analysis and benchmarking pipeline: 1. Research the latest orbital parameters (apogee, perigee, inclination, orbital period) of the James Webb Space Telescope (JWST) and the Hubble Space Telescope (HST). 2. Use python_repl to model a 10-day orbital simulation comparing their altitude fluctuations and orbital speeds, accounting for standard gravitational parameters. 3. Generate a structured JSON dataset saved to 'orbit_telemetry.json' containing 24 data points per day for both telescopes. 4. From the dataset, compute statistical aggregates (mean altitude, max speed, total distance traversed) and write a formatted comparison table into 'telescope_comparison.md'. 5. Read back both 'orbit_telemetry.json' and 'telescope_comparison.md' to verify file integrity and assert that total calculated telemetry points equal exactly 480."
+}

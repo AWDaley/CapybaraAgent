@@ -1,0 +1,175 @@
+{
+  "pipeline_id": "zero_trust_microsegmentation_pipeline_01",
+  "title": "Zero-Trust Microsegmentation and Supply Chain Blast Radius Pipeline",
+  "global_context": {
+    "incident_id": "#INC-9940",
+    "threat_actor": "APT-29-UNC",
+    "zones": {
+      "EDGE_DMZ": [
+        "EDGE_ROUTER",
+        "REPO_MIRROR_01",
+        "AUTH_PROXY",
+        "API_GW"
+      ],
+      "K8S_CLUSTER": [
+        "INGRESS_CTRL",
+        "AUTH_SVC",
+        "PAYMENT_SVC",
+        "ORDER_SVC",
+        "INVENTORY_SVC"
+      ],
+      "DATA_TIER": [
+        "REDIS_CACHE",
+        "ORDER_DB_PRIMARY",
+        "ORDER_DB_REPLICA",
+        "VAULT_SECRET_SRV"
+      ],
+      "MGMT_INFRA": [
+        "BASTION_HOST",
+        "CI_CD_RUNNER",
+        "AUDIT_LOG_SRV"
+      ]
+    }
+  },
+  "pipeline": [
+    {
+      "step_id": "step_1_topology",
+      "specialist": "coder",
+      "objective": "Construct a 16-node hybrid-cloud dependency graph in python_repl (using networkx: 'import networkx as nx; G = nx.DiGraph()' or dict). Store the graph globally in REPL as 'G'. Ensure all 16 nodes across EDGE_DMZ (4), K8S_CLUSTER (5), DATA_TIER (4), and MGMT_INFRA (3) are added, with directed dependency edges connecting REPO_MIRROR_01 -> CI_CD_RUNNER -> PAYMENT_SVC -> VAULT_SECRET_SRV, CI_CD_RUNNER -> ORDER_SVC -> ORDER_DB_PRIMARY -> ORDER_DB_REPLICA, INGRESS_CTRL -> AUTH_SVC -> REDIS_CACHE, and BASTION_HOST -> AUDIT_LOG_SRV.",
+      "tool_allowlist": [
+        "python_repl",
+        "calc"
+      ],
+      "inputs": {
+        "compromised_node": "REPO_MIRROR_01",
+        "crown_jewel_target": "VAULT_SECRET_SRV",
+        "total_nodes": 16
+      },
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "G",
+          "assertion": "len(G.nodes if hasattr(G, 'nodes') else (G.get('nodes') if isinstance(G, dict) and 'nodes' in G else G)) == 16"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "G",
+          "assertion": "'REPO_MIRROR_01' in (G.nodes if hasattr(G, 'nodes') else G) and 'VAULT_SECRET_SRV' in (G.nodes if hasattr(G, 'nodes') else G)"
+        }
+      ],
+      "max_retries": 2
+    },
+    {
+      "step_id": "step_2_blast_radius_analysis",
+      "specialist": "coder",
+      "objective": "Using python_repl and the 16-node graph 'G' from Step 1, compute the supply-chain infiltration attack path from 'REPO_MIRROR_01' to 'VAULT_SECRET_SRV'. Use nx.shortest_path(G, 'REPO_MIRROR_01', 'VAULT_SECRET_SRV') to find the shortest path, compute hops, extract the downstream blast radius using nx.descendants(G, 'REPO_MIRROR_01'), extract upstream dependencies using nx.ancestors(G, 'VAULT_SECRET_SRV'), and identify the critical bridge choke point ('CI_CD_RUNNER'). Store the resulting dictionary in REPL as 'supply_chain_analysis' with keys 'shortest_path', 'hops', 'descendants', 'ancestors', and 'choke_point'.",
+      "tool_allowlist": [
+        "python_repl",
+        "calc"
+      ],
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "supply_chain_analysis",
+          "assertion": "'shortest_path' in supply_chain_analysis and 'descendants' in supply_chain_analysis and len(supply_chain_analysis['descendants']) >= 5"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "supply_chain_analysis",
+          "assertion": "supply_chain_analysis.get('choke_point') == 'CI_CD_RUNNER' or 'CI_CD_RUNNER' in supply_chain_analysis.get('shortest_path', [])"
+        }
+      ],
+      "max_retries": 2
+    },
+    {
+      "step_id": "step_3_export_telemetry_json",
+      "specialist": "harness",
+      "objective": "Deterministically materialize 'supply_chain_audit.json' from REPL globals 'G' and 'supply_chain_analysis' with 0 LLM calls.",
+      "output_spec": {
+        "spec_type": "repl_template",
+        "target_file": "supply_chain_audit.json",
+        "template": {
+          "incident_id": "#INC-9940",
+          "threat_actor": "APT-29-UNC",
+          "compromised_source": "REPO_MIRROR_01",
+          "target_asset": "VAULT_SECRET_SRV",
+          "shortest_path": "$eval:supply_chain_analysis.get('shortest_path', [])",
+          "hops": "$eval:supply_chain_analysis.get('hops', 0)",
+          "blast_radius_nodes": "$eval:list(supply_chain_analysis.get('descendants', []))",
+          "upstream_ancestors": "$eval:list(supply_chain_analysis.get('ancestors', []))",
+          "choke_point": "$eval:supply_chain_analysis.get('choke_point', 'CI_CD_RUNNER')",
+          "all_nodes": "$eval:list(G.nodes) if hasattr(G, 'nodes') else list(G.keys())"
+        }
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "supply_chain_audit.json",
+          "required_keys": [
+            "incident_id",
+            "threat_actor",
+            "compromised_source",
+            "target_asset",
+            "shortest_path",
+            "blast_radius_nodes",
+            "choke_point",
+            "all_nodes"
+          ],
+          "min_items": {
+            "blast_radius_nodes": 5,
+            "all_nodes": 16
+          }
+        }
+      ],
+      "max_retries": 1
+    },
+    {
+      "step_id": "step_4_active_remediation_test",
+      "specialist": "coder",
+      "objective": "In python_repl, simulate active microsegmentation containment on the existing graph 'G' from Step 1. IMPORTANT: Graph 'G' is already persistent in REPL globals \u2014 do NOT re-create the graph or call open(). Simply clone it: 'G_isolated = G.copy()', isolate the choke point by removing 'CI_CD_RUNNER' ('G_isolated.remove_node(\"CI_CD_RUNNER\")'), and verify that 'not nx.has_path(G_isolated, \"REPO_MIRROR_01\", \"VAULT_SECRET_SRV\")' is True. Assign the REPL variables directly: 'containment_verified = True' and 'isolation_telemetry = {\"path_blocked\": True, \"isolated_choke_point\": \"CI_CD_RUNNER\", \"remaining_reachable_nodes\": sorted(list(nx.descendants(G_isolated, \"REPO_MIRROR_01\")))}'.",
+      "tool_allowlist": [
+        "python_repl",
+        "calc"
+      ],
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "containment_verified",
+          "assertion": "containment_verified is True"
+        },
+        {
+          "type": "repl_variable",
+          "variable": "isolation_telemetry",
+          "assertion": "isolation_telemetry.get('path_blocked') is True and isolation_telemetry.get('isolated_choke_point') == 'CI_CD_RUNNER'"
+        }
+      ],
+      "max_retries": 2,
+      "max_steps": 10
+    },
+    {
+      "step_id": "step_5_synthesize_containment_report",
+      "specialist": "general",
+      "objective": "Read 'supply_chain_audit.json' with read_file and write 'zero_trust_containment_report.md' using write_file. The markdown report must detail: Incident ID (#INC-9940), Threat Actor (APT-29-UNC), Initial Compromise Node (REPO_MIRROR_01), Target Asset (VAULT_SECRET_SRV), Shortest Attack Path, List of Reachable Blast Radius Nodes, Identified Choke Point (CI_CD_RUNNER), and Recommended Kubernetes NetworkPolicy / Firewall Rules to enforce zero-trust isolation. Explicitly write the full report out to 'zero_trust_containment_report.md'.",
+      "inputs_from_step": "step_3_export_telemetry_json",
+      "tool_allowlist": [
+        "read_file",
+        "write_file"
+      ],
+      "verification_criteria": [
+        {
+          "type": "file_exists",
+          "path": "zero_trust_containment_report.md",
+          "min_size": 300
+        },
+        {
+          "type": "cross_entity",
+          "source_json": "supply_chain_audit.json",
+          "target_file": "zero_trust_containment_report.md",
+          "entity_key": "blast_radius_nodes",
+          "min_match_ratio": 0.5
+        }
+      ],
+      "max_retries": 2
+    }
+  ]
+}

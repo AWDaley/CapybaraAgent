@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capybara-agent"
+version = "0.1.0"
+description = "A local, tool-using AI agent with optional TAL workflows"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.setuptools]
+packages = ["agents", "memory", "providers", "tal", "tools"]
+py-modules = [
+    "agent", "context_manager", "guardrails", "llm_client", "main",
+    "planning_agent", "prompt_loader", "tal_test_report", "tal_test_runner",
+    "token_counter", "web",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = [".venv", ".pytest_cache", "workspace", "data", "tests"]
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["F"]

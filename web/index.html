@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capybara Agent</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Main Chat Area -->
+        <main class="chat-area">
+            <header class="glass-header">
+                <div class="logo">
+                    <span class="emoji">🐹</span>
+                    <h1>Capybara</h1>
+                </div>
+                <div class="header-actions">
+                    <button id="workspace-toggle" class="icon-button" title="Workspace">🗂️</button>
+                    <button id="sessions-toggle" class="icon-button" title="Sessions">📂</button>
+                    <button id="settings-toggle" class="icon-button" title="Settings">⚙️</button>
+                </div>
+            </header>
+
+            <div id="chat-messages" class="messages-container">
+                <!-- Messages will be injected here -->
+                <div class="message system intro">
+                    <p>Welcome to Capybara! Please configure a provider in ⚙️ Settings to begin.</p>
+                </div>
+            </div>
+
+            <div class="input-area glass-panel">
+                <div class="typing-indicator hidden" id="typing-indicator">
+                    Capybara is thinking<span>.</span><span>.</span><span>.</span>
+                </div>
+                <div class="input-wrapper">
+                    <textarea id="message-input" placeholder="Ask Capybara anything..." rows="1"></textarea>
+                    <button id="send-button" class="primary-button">
+                        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+                <div class="footer-info">
+                    <span id="token-counter">Total Tokens: 0</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Settings Sidebar -->
+        <aside id="settings-sidebar" class="sidebar glass-panel right-sidebar">
+            <div class="sidebar-header">
+                <h2>⚙️ Settings</h2>
+                <button id="close-settings" class="icon-button">✕</button>
+            </div>
+            <div class="sidebar-content">
+                <div class="form-group">
+                    <label>Provider</label>
+                    <select id="provider-select">
+                        <option value="">Select Provider...</option>
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Gemini</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="api-key-group" style="display: none;">
+                    <label>API Key</label>
+                    <input type="password" id="api-key-input" placeholder="sk-...">
+                </div>
+
+                <div class="form-group" id="auth-token-group">
+                    <label>Auth Token (optional)</label>
+                    <input type="password" id="auth-token-input" placeholder="Bearer token if set">
+                </div>
+
+                <div class="form-group">
+                    <label>Model</label>
+                    <select id="model-select" disabled>
+                        <option value="">Select Provider First...</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Agent Mode</label>
+                    <select id="mode-select">
+                        <option value="1">ReAct (Quick & Reactive)</option>
+                        <option value="2">Planning (Plan & Execute)</option>
+                        <option value="3">Multi-Agent (Orchestrator)</option>
+                    </select>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="reflection-toggle">
+                        Enable Self-Reflection
+                    </label>
+                </div>
+
+                <button id="save-settings" class="primary-button full-width">Save & Apply</button>
+            </div>
+        </aside>
+
+        <!-- Sessions Sidebar -->
+        <aside id="sessions-sidebar" class="sidebar glass-panel left-sidebar">
+            <div class="sidebar-header">
+                <h2>📂 Sessions</h2>
+                <button id="close-sessions" class="icon-button">✕</button>
+            </div>
+            <div class="sidebar-content">
+                <button id="new-session-btn" class="primary-button full-width outline">+ New Chat</button>
+                <div id="session-list" class="session-list">
+                    <!-- Session items injected here -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Workspace Sidebar -->
+        <aside id="workspace-sidebar" class="sidebar glass-panel left-sidebar workspace-sidebar-panel">
+            <div class="sidebar-header">
+                <h2>🗂️ Workspace</h2>
+                <button id="close-workspace" class="icon-button">✕</button>
+            </div>
+            <div class="sidebar-content">
+                <button id="refresh-workspace-btn" class="primary-button full-width outline">🔄 Refresh</button>
+                <div id="workspace-list" class="workspace-list">
+                    <!-- Files injected here -->
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Overlay for mobile sidebars -->
+        <div id="sidebar-overlay" class="overlay"></div>
+
+        <!-- File Preview Modal -->
+        <div id="file-preview-modal" class="modal hidden">
+            <div class="modal-content glass-panel">
+                <div class="modal-header">
+                    <h3 id="preview-filename">filename.txt</h3>
+                    <button id="close-preview" class="icon-button">✕</button>
+                </div>
+                <div class="modal-body">
+                    <pre><code id="preview-content"></code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Templates for JS -->
+    <template id="message-template">
+        <div class="message">
+            <div class="message-content"></div>
+            <div class="message-meta hidden">
+                <div class="tools-badges"></div>
+                <details class="thoughts-accordion">
+                    <summary>View Reasoning</summary>
+                    <div class="thoughts-content"></div>
+                </details>
+            </div>
+        </div>
+    </template>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

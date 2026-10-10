@@ -1,0 +1,17 @@
+{
+    "test_fact": "capybaras are cute",
+    "test_city": {
+        "value": "Tokyo",
+        "state": "reported",
+        "source": "user",
+        "confidence": 1.0
+    },
+    "CAPYBARA_INSECURE_SSL": "1",
+    "tokyo_destinations": "Tokyo Skytree, Ueno Park, Akihabara, Odaiba, Shibuya Sky, Tokyo Skytree",
+    "berlin_activities": {
+        "value": "[list of activities and URLs from web search]",
+        "state": "reported",
+        "source": "user",
+        "confidence": 1.0
+    }
+}

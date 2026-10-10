@@ -1,0 +1,19 @@
+{
+  "tal_version": "0.3.0",
+  "grammar_id": "tal-core-0.3.0",
+  "schema_id": "tal-manifest-0.3.0",
+  "domain_pack": "tal.mobile.private_assistant-0.1.0",
+  "request": {"request_id": "request:invalid-1", "submitted_by": "user:local-owner", "submitted_at": "2026-08-30T13:00:00Z", "channel": "mobile"},
+  "scope": {"scope_id": "scope:invalid-1", "organization_ref": "organization:personal", "target_refs": ["document:policy-7"], "entity_declarations": [{"entity_type": "document", "entity_ref": "document:policy-7"}], "timezone": "America/New_York"},
+  "goal": {"goal_id": "goal:invalid", "actor_ref": "agent:tervoro-mobile", "owner_ref": "user:local-owner", "target_ref": "document:policy-7", "outcome_id": "document.answer_with_evidence"},
+  "unknowns": [{"id": "unknown:question-1", "subject_ref": "document:policy-7", "field_id": "document.answer", "blocking": true}],
+  "requirements": [{"id": "requirement:evidence", "rule_id": "answer.material_claims_require_evidence", "verifier_id": "claim_citation_verifier", "target_refs": ["document:policy-7"]}],
+  "constraints": [{"id": "constraint:model-calls", "kind": "model_calls", "maximum": 4}],
+  "requested_capabilities": [{"id": "capability:document-read", "action_id": "document.selected.read", "target_ref": "document:policy-7"}],
+  "prohibited_actions": [{"id": "prohibition:network", "action_id": "cloud_model.request", "target_ref": "document:policy-7"}],
+  "success_conditions": [{"id": "success:answer-release", "condition_id": "answer_package_released", "terminal_outcome": "answer_delivered", "verification_mode": "deterministic_validator", "required_observation_types": ["verified_answer_package"]}],
+  "fallbacks": [{"id": "fallback:insufficient-evidence", "trigger": "information_timeout", "terminal_outcome": "escalated"}],
+  "output_contract": {"output_type": "answer_package", "required_fields": ["outcome"], "format": "mobile_ui", "destination": "local_ui"},
+  "integrity": {"canonicalization": "tal-json-c14n-0.2", "compiler_version": "tal-mobile-compiler-0.1.0", "manifest_version": 1, "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+  "unregistered_escape_hatch": true
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tal-mobile-device-profile-0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_profile_id", "minimum_android_api", "supported_abis", "minimum_memory_headroom_bytes", "maximum_context_tokens", "maximum_output_tokens", "maximum_session_millis", "minimum_battery_percent", "requires_charging_for_large_jobs", "thermal_policy"],
+  "properties": {
+    "device_profile_id": {"type": "string", "pattern": "^device-profile:[a-z0-9._-]+$"},
+    "minimum_android_api": {"type": "integer", "minimum": 28, "maximum": 99},
+    "supported_abis": {"type": "array", "minItems": 1, "items": {"enum": ["arm64-v8a"]}},
+    "minimum_memory_headroom_bytes": {"type": "integer", "minimum": 268435456},
+    "maximum_context_tokens": {"type": "integer", "minimum": 512, "maximum": 65536},
+    "maximum_output_tokens": {"type": "integer", "minimum": 64, "maximum": 8192},
+    "maximum_session_millis": {"type": "integer", "minimum": 1000, "maximum": 900000},
+    "minimum_battery_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+    "requires_charging_for_large_jobs": {"type": "boolean"},
+    "thermal_policy": {"enum": ["normal_only", "allow_moderate_with_warning"]}
+  }
+}

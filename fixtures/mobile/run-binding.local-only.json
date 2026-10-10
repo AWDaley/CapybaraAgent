@@ -1,0 +1,13 @@
+{
+  "run_binding_version": "0.1.0",
+  "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "policy_bundle_id": "tal-mobile-policy-bundle-0.1.0",
+  "policy_bundle_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "model_profile_id": "mobile.local.scripted-0.1.0",
+  "model_artifact_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "platform": "android",
+  "os_version": "36",
+  "device_profile_id": "device-profile:arm64-reference-0.1.0",
+  "network_mode": "local_only",
+  "created_at": "2026-08-30T13:00:00Z"
+}
