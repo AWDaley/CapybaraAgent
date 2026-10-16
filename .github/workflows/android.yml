@@ -21,6 +21,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          packages: '' # obsolete Android SDK 'tools' package is no longer published
       - name: Install Android 36 SDK
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
       - name: Compile app and run TAL/demo tests
