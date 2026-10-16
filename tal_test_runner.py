@@ -1,10 +1,10 @@
 import contextlib
 import logging
 import random
-import os
 import shutil
 import tempfile
 import time
+import threading
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -22,6 +22,9 @@ from tal_test_report import (
 )
 
 logger = logging.getLogger("capybara.tal_test")
+# Protect the legacy benchmark REPL globals against concurrent benchmark
+# trials. Unlike browser sessions, this in-process REPL has no own namespace.
+_BENCHMARK_REPL_LOCK = threading.RLock()
 
 
 class TrackingLLMClient(LLMClient):
@@ -85,19 +88,19 @@ class TrackingLLMClient(LLMClient):
 
 @contextlib.contextmanager
 def sandbox_workspace():
-    """Provides a temporary, isolated workspace directory to prevent run interference."""
-    temp_dir = tempfile.mkdtemp(prefix="capy_tal_test_")
-    import tools.file_tools
-    old_workspace = getattr(tools.file_tools, "WORKSPACE_DIR", None)
-    tools.file_tools.WORKSPACE_DIR = os.path.realpath(temp_dir)
+    """Use a ContextVar-bound temporary workspace; never rewrite globals."""
+    from tools.file_tools import workspace_scope
     from tools.external_tools import reset_repl_globals
-    reset_repl_globals()
+
+    temp_dir = tempfile.mkdtemp(prefix="capy_tal_test_")
     try:
-        yield temp_dir
+        with _BENCHMARK_REPL_LOCK, workspace_scope(temp_dir):
+            reset_repl_globals()
+            try:
+                yield temp_dir
+            finally:
+                reset_repl_globals()
     finally:
-        reset_repl_globals()
-        if old_workspace is not None:
-            tools.file_tools.WORKSPACE_DIR = old_workspace
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 

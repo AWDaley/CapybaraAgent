@@ -197,7 +197,7 @@ def test_sandbox_workspace_isolation():
     original_workspace = tools.file_tools.WORKSPACE_DIR
 
     with sandbox_workspace() as ws1:
-        assert tools.file_tools.WORKSPACE_DIR == os.path.realpath(ws1)
+        assert os.fspath(tools.file_tools.WORKSPACE_DIR) == os.path.realpath(ws1)
         # Write a file inside ws1
         res = tools.file_tools.write_file(json.dumps({"path": "temp_test.txt", "content": "Run 1 data"}))
         assert "File written" in res

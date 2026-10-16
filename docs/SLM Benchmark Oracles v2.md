@@ -6,7 +6,10 @@ cases, preserving versioned fingerprints and reproducibility.
 
 Evidence collection is scoped to specific requested REPL variable names and
 output artifact filenames and occurs **before the isolated trial workspace is
-destroyed**. The capture rejects arbitrary Python objects, large values,
+destroyed**. The trial uses request-scoped workspace context rather than
+mutating the application-wide WORKSPACE_DIR. Concurrent benchmark trials
+serialize access to the legacy REPL global state; use isolated worker
+processes before supporting untrusted parallel model runs. The capture rejects arbitrary Python objects, large values,
 NaN/Infinity, and oversized artifact files. Artifacts include captured
 UTF-8 content, size, and SHA-256 for replayable offline scoring. Do not use
 real customer files in benchmark runs; scorecards include bounded captured
