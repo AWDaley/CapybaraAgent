@@ -463,6 +463,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 def start_server(host="localhost", port=8000):
+    if host not in {"localhost", "127.0.0.1", "::1"} and os.environ.get("CAPYBARA_UNSAFE_LOCAL_EXEC") == "1":
+        raise RuntimeError("Unsafe local development execution cannot be exposed over a network.")
     if host not in {"localhost", "127.0.0.1", "::1"} and not _auth_token:
         raise RuntimeError("CAPYBARA_AUTH_TOKEN is required when binding beyond loopback.")
     with ThreadingHTTPServer((host, port), CapybaraHandler) as httpd:

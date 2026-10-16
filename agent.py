@@ -58,6 +58,9 @@ class BasicAgent:
         self.budget_tracker = BudgetTracker(limits=copy.deepcopy(self.budget_limits))
         self.memory = []
         self.tools = tool_registry if tool_registry is not None else TOOL_REGISTRY
+        if self.tal_mode:
+            from execution.isolated import govern_agent_tools
+            self.tools = govern_agent_tools(self.tools)
         self._tool_descriptions_fn = tool_descriptions_fn or get_tool_descriptions
         self.context_manager = ContextManager(tal_mode=tal_mode)
         self.token_counter = TokenCounter()
