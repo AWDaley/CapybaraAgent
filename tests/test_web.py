@@ -183,3 +183,99 @@ def test_plan_terminal_failure_is_visible_from_shared_execution_log():
     planner = PlanningAgent(basic, basic.llm_client, tal_mode=True)
     basic.event_log.append("task_outcome", {"status": "failed"})
     assert _terminal_outcome(planner) == "failed"
+
+
+def test_cookie_is_server_issued_and_ignores_spoofed_session_header(web_server):
+    import http.cookiejar
+    import web
+
+    one_jar, two_jar = http.cookiejar.CookieJar(), http.cookiejar.CookieJar()
+    one = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(one_jar))
+    two = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(two_jar))
+
+    one.open(web_server["url"] + "/index.html").close()
+    two.open(web_server["url"] + "/index.html").close()
+    one_cookie = next(c for c in one_jar if c.name == "capybara_sid")
+    two_cookie = next(c for c in two_jar if c.name == "capybara_sid")
+    assert one_cookie.value != two_cookie.value
+    assert "HttpOnly" in one_cookie._rest
+    first_id = one_cookie.value.split(".")[0]
+    second_id = two_cookie.value.split(".")[0]
+    assert first_id != second_id
+
+    # Server-to-server tests can seed files directly; the REST endpoint must
+    # expose only the authenticated browser's own scope.
+    first_state = web._get_web_session(first_id)
+    second_state = web._get_web_session(second_id)
+    from pathlib import Path
+    Path(first_state["workspace_dir"], "private.txt").write_text("first private", encoding="utf-8")
+    Path(second_state["workspace_dir"], "private.txt").write_text("second private", encoding="utf-8")
+
+    first_url = web_server["url"] + "/api/workspace/file?name=private.txt"
+    assert json.loads(one.open(first_url).read())["content"] == "first private"
+    assert json.loads(two.open(first_url).read())["content"] == "second private"
+
+    spoofed = urllib.request.Request(first_url, headers={"X-Capybara-Session": first_id})
+    assert json.loads(two.open(spoofed).read())["content"] == "second private"
+
+
+def test_invalid_cookie_is_not_an_ownership_credential(web_server):
+    invalid_cookie = "capybara_sid=00000000-0000-0000-0000-000000000001.invalid"
+    request = urllib.request.Request(
+        web_server["url"] + "/api/workspace",
+        headers={"Cookie": invalid_cookie},
+    )
+    with urllib.request.urlopen(request) as response:
+        assert response.status == 200
+        new_cookie = response.headers.get("Set-Cookie", "")
+    assert "capybara_sid=" in new_cookie
+    assert "invalid" not in new_cookie
+
+
+def test_workspace_context_flows_into_tool_worker(temp_workspace):
+    from pathlib import Path
+    from agent import BasicAgent
+    from tal.context_packer import ExecutionPhase
+    from tools.file_tools import read_file, workspace_scope
+
+    first = Path(temp_workspace, "a")
+    second = Path(temp_workspace, "b")
+    first.mkdir()
+    second.mkdir()
+    (first / "note.txt").write_text("from-a", encoding="utf-8")
+    (second / "note.txt").write_text("from-b", encoding="utf-8")
+    with workspace_scope(str(first)):
+        agent = BasicAgent(tal_mode=True, tool_registry={"read_file": read_file})
+        agent.current_phase = ExecutionPhase.EXECUTION
+        first_result = agent.act_result("read_file", '{"path":"note.txt"}')
+    with workspace_scope(str(second)):
+        agent2 = BasicAgent(tal_mode=True, tool_registry={"read_file": read_file})
+        agent2.current_phase = ExecutionPhase.EXECUTION
+        second_result = agent2.act_result("read_file", '{"path":"note.txt"}')
+    agent._executor.shutdown(wait=True)
+    agent2._executor.shutdown(wait=True)
+    assert first_result.stdout == "from-a"
+    assert second_result.stdout == "from-b"
+
+
+def test_web_rejects_other_browser_session_file(web_server):
+    import http.cookiejar
+    import web
+    jar1 = http.cookiejar.CookieJar()
+    jar2 = http.cookiejar.CookieJar()
+    browser1 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar1))
+    browser2 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar2))
+    browser1.open(web_server["url"] + "/index.html").close()
+    browser2.open(web_server["url"] + "/index.html").close()
+    sid1 = next(c for c in jar1 if c.name == "capybara_sid").value.split(".")[0]
+    manager = web._get_web_session(sid1)["session_manager"]
+    manager.start_new_session()
+    manager.auto_save([{"role": "user", "content": "secret"}])
+    payload = json.dumps({"filepath": manager.current_session_file}).encode("utf-8")
+    request = urllib.request.Request(
+        web_server["url"] + "/api/sessions/load", data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        browser2.open(request)
+    assert error.value.code == 403

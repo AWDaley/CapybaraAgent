@@ -1,11 +1,16 @@
+import hashlib
+import hmac
 import http.server
 import json
 import logging
 import os
+import secrets
 import socketserver
+import ssl
 import threading
 import urllib.parse
 import uuid
+from http.cookies import CookieError, SimpleCookie
 
 from agent import BasicAgent
 from agents.orchestrator import OrchestratorAgent
@@ -15,9 +20,20 @@ from memory.knowledge_store import KnowledgeStore
 from planning_agent import PlanningAgent
 from tools import TOOL_REGISTRY
 from tools.external_tools import create_repl_scope
+from tools.file_tools import workspace_scope
+from tal.safe_paths import resolve_workspace_path
 
 logger = logging.getLogger("capybara.web")
 _auth_token = os.environ.get("CAPYBARA_AUTH_TOKEN")
+# Server-side session identity, not a caller-controlled X-Capybara-Session value.
+# Configure a stable 32+ character secret to retain signed sessions after restarts.
+_supplied_session_secret = os.environ.get("CAPYBARA_SESSION_SECRET", "")
+_session_key = (
+    _supplied_session_secret.encode("utf-8")
+    if len(_supplied_session_secret) >= 32 else secrets.token_bytes(32)
+)
+_SESSION_COOKIE = "capybara_sid"
+_MAX_WORKSPACE_PREVIEW_BYTES = 1024 * 1024
 
 # Defaults are copied into each browser session.  Do not put mutable state here.
 _DEFAULT_AGENT_CONFIG = {
@@ -36,14 +52,21 @@ MAX_REQUEST_BYTES = 256 * 1024
 _CONFIG_FIELDS = {"provider", "model", "api_key", "mode", "reflection", "guardrails", "tal_mode"}
 
 def _new_web_session(session_id=None):
-    """Return isolated server-side state for one browser session."""
+    """Provision one private workspace, memory namespace and approval scope."""
+    namespace = session_id if session_id and session_id != "legacy" else str(uuid.uuid4())
+    manager = SessionManager(session_namespace=namespace)
+    workspace_dir = os.path.realpath(os.path.join(manager.sessions_dir, "workspace"))
+    os.makedirs(workspace_dir, mode=0o700, exist_ok=True)
+    if os.name == "posix":
+        os.chmod(workspace_dir, 0o700)
     return {
         "config": dict(_DEFAULT_AGENT_CONFIG),
         "knowledge_store": KnowledgeStore(
-            filepath=os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sessions", f"knowledge_{session_id or uuid.uuid4().hex}.json")
+            filepath=os.path.join(manager.sessions_dir, "knowledge.json")
         ),
         "agent": None,
-        "session_manager": SessionManager(session_namespace=session_id or str(uuid.uuid4())),
+        "session_manager": manager,
+        "workspace_dir": workspace_dir,
         "pending_approvals": {},
         "run_lock": threading.Lock(),
         "repl_scope": create_repl_scope(),
@@ -53,10 +76,12 @@ def _new_web_session(session_id=None):
 def _get_web_session(session_id):
     with _state_lock:
         if session_id not in _web_sessions:
-            # "legacy" exists for old API clients which omit the header, but
-            # receives a random private namespace rather than shared history.
-            _web_sessions[session_id] = _new_web_session(None if session_id == "legacy" else session_id)
+            _web_sessions[session_id] = _new_web_session(session_id)
         return _web_sessions[session_id]
+
+
+def _sign_session_id(session_id: str) -> str:
+    return hmac.new(_session_key, session_id.encode("ascii"), hashlib.sha256).hexdigest()
 
 
 def _terminal_outcome(agent) -> str:
@@ -143,6 +168,21 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
         web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
         super().__init__(*args, directory=web_dir, **kwargs)
         
+    def end_headers(self):
+        token = getattr(self, "_pending_session_cookie", None)
+        if token:
+            secure = (
+                isinstance(self.connection, ssl.SSLSocket)
+                or os.environ.get("CAPYBARA_SECURE_COOKIE") == "1"
+            )
+            suffix = "; Secure" if secure else ""
+            self.send_header(
+                "Set-Cookie",
+                f"{_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{suffix}",
+            )
+            self._pending_session_cookie = None
+        super().end_headers()
+
     def _send_json(self, data, status=200):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
@@ -150,14 +190,27 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode('utf-8'))
 
     def _session_id(self):
-        """Read the opaque client ID without accepting arbitrary server keys."""
-        value = self.headers.get("X-Capybara-Session", "legacy")
-        if value == "legacy":
-            return value
+        """Accept a signed, server-issued browser cookie, never a client UUID."""
+        remembered = getattr(self, "_resolved_session_id", None)
+        if remembered:
+            return remembered
         try:
-            return str(uuid.UUID(value))
-        except (ValueError, AttributeError):
-            return "legacy"
+            jar = SimpleCookie()
+            jar.load(self.headers.get("Cookie", ""))
+            cookie = jar.get(_SESSION_COOKIE)
+            value = cookie.value if cookie is not None else ""
+            session_id, signature = value.rsplit(".", 1)
+            session_id = str(uuid.UUID(session_id))
+            if hmac.compare_digest(_sign_session_id(session_id), signature):
+                self._resolved_session_id = session_id
+                return session_id
+        except (CookieError, ValueError, AttributeError):
+            pass
+
+        session_id = str(uuid.uuid4())
+        self._resolved_session_id = session_id
+        self._pending_session_cookie = f"{session_id}.{_sign_session_id(session_id)}"
+        return session_id
 
     def _public_config(self, config):
         config = dict(config)
@@ -175,6 +228,10 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        # Establish the browser's server-issued session before loading JS;
+        # otherwise concurrent first API fetches could create separate sessions.
+        if self.path in {"/", "/index.html"}:
+            self._session_id()
         if self.path == "/":
             self.send_response(302)
             self.send_header('Location', '/index.html')
@@ -216,40 +273,48 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(sessions)
             
         elif self.path == "/api/workspace":
-            workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
-            os.makedirs(workspace_dir, exist_ok=True)
+            workspace_dir = state["workspace_dir"]
             files = []
-            for f in os.listdir(workspace_dir):
-                path = os.path.join(workspace_dir, f)
-                if os.path.isfile(path):
-                    files.append({"name": f, "size": os.path.getsize(path)})
+            for parent, directories, names in os.walk(workspace_dir, followlinks=False):
+                directories[:] = [d for d in directories if not os.path.islink(os.path.join(parent, d))]
+                for name in names:
+                    relative = os.path.relpath(os.path.join(parent, name), workspace_dir)
+                    try:
+                        safe_path = resolve_workspace_path(workspace_dir, relative)
+                    except ValueError:
+                        continue
+                    if os.path.isfile(safe_path):
+                        files.append({"name": relative.replace(os.sep, "/"), "size": os.path.getsize(safe_path)})
+                    if len(files) >= 200:
+                        break
+                if len(files) >= 200:
+                    break
             self._send_json({"files": files})
-            
+
         elif self.path.startswith("/api/workspace/file"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             filename = query.get("name", [""])[0]
             if not filename:
                 self._send_json({"error": "Filename required"}, status=400)
                 return
-                
-            workspace_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "workspace"))
-            safe_path = os.path.realpath(os.path.join(workspace_dir, filename))
-            
-            if os.path.commonpath([workspace_dir, safe_path]) != workspace_dir:
-                self._send_json({"error": "Access denied: path traversal detected"}, status=403)
+            try:
+                safe_path = resolve_workspace_path(state["workspace_dir"], filename)
+            except ValueError:
+                self._send_json({"error": "Access denied: invalid workspace path"}, status=403)
                 return
-                
-            if not os.path.exists(safe_path):
+            if not os.path.isfile(safe_path):
                 self._send_json({"error": "File not found"}, status=404)
                 return
-                
+            if os.path.getsize(safe_path) > _MAX_WORKSPACE_PREVIEW_BYTES:
+                self._send_json({"error": "File exceeds preview limit"}, status=413)
+                return
             try:
-                with open(safe_path, "r", encoding="utf-8") as f:
-                    content = f.read()
+                with open(safe_path, "r", encoding="utf-8") as handle:
+                    content = handle.read()
                 self._send_json({"name": filename, "content": content})
-            except Exception as e:
-                self._send_json({"error": str(e)}, status=500)
-                
+            except (OSError, UnicodeError):
+                self._send_json({"error": "Unable to preview this file"}, status=400)
+
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -326,6 +391,9 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/sessions/load":
             filepath = body.get("filepath")
             if filepath:
+                if not state["session_manager"].owns_session(filepath):
+                    self._send_json({"error": "Session file is not owned by this browser"}, status=403)
+                    return
                 with _state_lock:
                     mem = state["session_manager"].load_session(filepath)
                 # Ensure agent exists before setting memory
@@ -382,7 +450,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                     model = state["config"]["model"]
                     provider = state["config"]["provider"]
 
-                with state["run_lock"]:
+                with state["run_lock"], workspace_scope(state["workspace_dir"]):
                     if mode in ("2", "3"):
                          trace = agent.run_with_trace(message, approval_callback=_default_deny_callback)
                     else:
@@ -448,7 +516,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                     model = state["config"]["model"]
                     provider = state["config"]["provider"]
 
-                with state["run_lock"]:
+                with state["run_lock"], workspace_scope(state["workspace_dir"]):
                     if mode in ("2", "3"):
                         agent.run_streaming(message, callback=emit, approval_callback=request_approval)
                     else:

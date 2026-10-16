@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextvars
 import hashlib
 import inspect
 import os
@@ -496,7 +497,10 @@ class BasicAgent:
                         return secure_runner.run_prepared(prepared_command), execution_started_at
                     return tool_function(args), execution_started_at
 
-                future = self._executor.submit(invoke_tool)
+                # ThreadPoolExecutor does not propagate ContextVars automatically.
+                # Carry the server-issued workspace into the tool worker.
+                caller_context = contextvars.copy_context()
+                future = self._executor.submit(caller_context.run, invoke_tool)
                 try:
                     timeout = 30.0
                     if self._execution_deadline:

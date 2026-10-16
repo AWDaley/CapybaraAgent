@@ -1,7 +1,7 @@
 import { state } from './state.js';
 
 export function getAuthHeaders() {
-    const headers = { 'X-Capybara-Session': state.clientSessionToken };
+    const headers = {};
     const token = sessionStorage.getItem('capybara_auth_token');
     if (token) {
         headers.Authorization = `Bearer ${token}`;
