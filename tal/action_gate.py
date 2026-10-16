@@ -8,6 +8,7 @@ from .context_packer import PHASE_TOOL_ALLOWLIST, ExecutionPhase
 from .effect_classes import ApprovalPolicy, get_approval_policy, get_effect_class
 from .proposal_types import ActionProposal
 from .schemas import SchemaViolationError, validate_tool_args
+from .safe_paths import resolve_workspace_path
 
 
 @dataclass
@@ -99,19 +100,17 @@ class ActionGate:
 
         # Stage 4: Parameter Sanitization
         if isinstance(sanitized_dict, dict):
-            # File sandbox path sanitization
+            # Revalidate the actual workspace path before granting an effect.
             if "path" in sanitized_dict:
-                path_val = str(sanitized_dict["path"])
-                if ".." in path_val or path_val.startswith("/") or (len(path_val) > 1 and path_val[1] == ":"):
-                    # Check path traversal
-                    workspace_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "workspace"))
-                    target_path = os.path.abspath(os.path.join(workspace_dir, path_val))
-                    if os.path.commonpath([workspace_dir, target_path]) != workspace_dir:
-                        return GateResult(
-                            allowed=False,
-                            stage_failed="Stage 4: Parameter Sanitization",
-                            reason=f"Path traversal detected: '{path_val}' escapes workspace sandbox"
-                        )
+                try:
+                    from tools.file_tools import WORKSPACE_DIR
+                    resolve_workspace_path(WORKSPACE_DIR, str(sanitized_dict["path"]))
+                except ValueError as exc:
+                    return GateResult(
+                        allowed=False,
+                        stage_failed="Stage 4: Parameter Sanitization",
+                        reason=f"Path traversal detected: {exc}",
+                    )
 
             # Shell command sanitization
             if tool_name == "run_command" and "command" in sanitized_dict:

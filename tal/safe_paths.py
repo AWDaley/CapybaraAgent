@@ -1,17 +1,29 @@
-"""Shared filesystem boundary helpers for TAL workflows."""
+"""Shared, host-independent filesystem boundary helpers for TAL workflows."""
 
 from __future__ import annotations
 
+import ntpath
 import os
 
 
-def resolve_workspace_path(workspace_dir: str, requested_path: str) -> str:
-    """Resolve a relative path and ensure it remains in *workspace_dir*."""
+def validate_relative_workspace_path(requested_path: str) -> str:
+    """Reject traversal and Windows/POSIX absolute paths on every host OS."""
     if not isinstance(requested_path, str) or not requested_path.strip():
         raise ValueError("A non-empty relative workspace path is required")
-    if os.path.isabs(requested_path):
-        raise ValueError("Absolute paths are not permitted")
+    if "\x00" in requested_path:
+        raise ValueError("NUL bytes are not permitted in workspace paths")
+    normalized = requested_path.replace("\\", "/")
+    drive, _ = ntpath.splitdrive(requested_path)
+    if drive or normalized.startswith("/") or os.path.isabs(requested_path):
+        raise ValueError("Absolute or drive-qualified paths are not permitted")
+    if any(part == ".." for part in normalized.split("/")):
+        raise ValueError("Parent traversal is not permitted")
+    return requested_path
 
+
+def resolve_workspace_path(workspace_dir: str, requested_path: str) -> str:
+    """Resolve a relative path and ensure it remains inside *workspace_dir*."""
+    validate_relative_workspace_path(requested_path)
     workspace = os.path.realpath(workspace_dir)
     resolved = os.path.realpath(os.path.join(workspace, requested_path))
     try:
