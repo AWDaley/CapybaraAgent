@@ -59,6 +59,21 @@ def _get_web_session(session_id):
         return _web_sessions[session_id]
 
 
+def _terminal_outcome(agent) -> str:
+    """Expose only trustworthy task-wide statuses to the web interface."""
+    from tal.outcomes import OutcomeStatus
+
+    # Planning/orchestration currently do not provide one unified task-wide
+    # verification result. Their step-level evidence must not be promoted to a
+    # verified overall task until Phase 2 unifies execution paths.
+    if not isinstance(agent, BasicAgent):
+        return OutcomeStatus.COMPLETED_UNVERIFIED.value
+    for event in reversed(agent.event_log.events):
+        if event.event_type == "task_outcome":
+            return event.data.get("status", OutcomeStatus.COMPLETED_UNVERIFIED.value)
+    return OutcomeStatus.COMPLETED_UNVERIFIED.value
+
+
 def _shutdown_agent(agent):
     """Release an agent's executor when a session changes configuration."""
     basic = getattr(agent, "basic_agent", agent)
@@ -372,6 +387,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                     else:
                          trace = agent.run_turn_with_trace(message, approval_callback=_default_deny_callback)
                      
+                trace.setdefault("outcome", _terminal_outcome(agent))
                 # Auto-save
                 mem = []
                 if hasattr(agent, 'memory'): mem = agent.memory
@@ -442,6 +458,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                 if hasattr(agent, 'token_counter'): tokens = agent.token_counter.total
                 elif hasattr(agent, 'basic_agent') and hasattr(agent.basic_agent, 'token_counter'): tokens = agent.basic_agent.token_counter.total
                 
+                emit("outcome", {"status": _terminal_outcome(agent)})
                 emit("done", {"tokens_used": tokens})
                 
                 # Auto-save

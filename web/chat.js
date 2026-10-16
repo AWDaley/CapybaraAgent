@@ -175,6 +175,20 @@ export async function sendMessage() {
                         
                         scrollToBottom();
                     }
+                    else if (event.type === 'outcome') {
+                        const labels = {
+                            verified: 'Verified against declared acceptance checks',
+                            completed_unverified: 'Completed — independent verification unavailable',
+                            failed: 'Task failed verification',
+                            escalated: 'Task escalated',
+                            waiting_for_user: 'Waiting for user input'
+                        };
+                        const outcome = document.createElement('div');
+                        outcome.className = 'verification-outcome';
+                        outcome.textContent = labels[event.status] || 'Verification status unavailable';
+                        content.appendChild(outcome);
+                        scrollToBottom();
+                    }
                     else if (event.type === 'done') {
                         if (event.tokens_used) {
                             const tc = document.getElementById('token-counter');
