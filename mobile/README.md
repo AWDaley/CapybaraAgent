@@ -72,6 +72,7 @@ third-party model. Use `bash ./gradlew :tal-core:test :app:assembleDemoDebug
 
 Write approvals bind to a specific `ApprovalRequest.requestId`. A cancelled
 or failed biometric prompt resolves as DENIED, and late callbacks cannot approve
-a different task. Model imports delete abandoned staged files on all failure
-paths and discard successful rollback copies. Device-specific biometric,
+a different task. Model imports delete abandoned staged files on failure and keep an old
+package only until the replacement has **successfully initialized**.
+Incomplete promotions restore their previous model at the next startup. Device-specific biometric,
 Keystore, GPU and performance behavior still requires physical-device testing.

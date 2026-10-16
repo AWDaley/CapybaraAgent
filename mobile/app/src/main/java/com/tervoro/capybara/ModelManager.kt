@@ -23,8 +23,12 @@ class ModelManager(
         check(mkdirs() || isDirectory)
     }
     private val modelFile = File(modelDirectory, "active.litertlm")
+    private val rollbackFile = File(modelDirectory, "rollback.litertlm")
 
     fun installedPath(): String? {
+        // A rollback file means a previous install was interrupted between
+        // promotion and commit. Recover the old package before activation.
+        if (rollbackFile.isFile) rollbackPromotion()
         if (!modelFile.isFile) return null
         if (BuildConfig.DEBUG && BuildConfig.APPROVED_MODEL_SHA256.isEmpty()) {
             return modelFile.absolutePath
@@ -93,20 +97,45 @@ class ModelManager(
     fun promote(staged: StagedModel): InstalledModel {
         val source = File(staged.model.path)
         require(source.parentFile == modelDirectory && source.isFile) { "Staged model is unavailable" }
-        val rollback = File(modelDirectory, "rollback.litertlm")
+        check(!rollbackFile.exists()) { "Unresolved previous model promotion; recover before importing" }
         if (modelFile.isFile) {
-            java.nio.file.Files.move(modelFile.toPath(), rollback.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            java.nio.file.Files.move(
+                modelFile.toPath(), rollbackFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
         }
         try {
-            java.nio.file.Files.move(source.toPath(), modelFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+            java.nio.file.Files.move(
+                source.toPath(), modelFile.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
         } catch (error: Exception) {
-            if (rollback.isFile) java.nio.file.Files.move(rollback.toPath(), modelFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            if (rollbackFile.isFile) {
+                java.nio.file.Files.move(
+                    rollbackFile.toPath(), modelFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
             throw error
         }
-        // The former model may be large; do not retain unlimited rollback
-        // copies once the replacement was promoted successfully.
-        if (rollback.isFile) rollback.delete()
         return staged.model.copy(path = modelFile.absolutePath)
+    }
+
+    /** Publish only after the runtime successfully initializes the promoted bytes. */
+    fun completePromotion() {
+        java.nio.file.Files.deleteIfExists(rollbackFile.toPath())
+    }
+
+    /** If initialization fails, restore the previous active package (if any). */
+    fun rollbackPromotion() {
+        if (rollbackFile.isFile) {
+            java.nio.file.Files.move(
+                rollbackFile.toPath(), modelFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        } else {
+            modelFile.delete()
+        }
     }
 
     fun discard(staged: StagedModel) {

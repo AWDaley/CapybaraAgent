@@ -70,6 +70,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     )
     private var approvalDeferred: CompletableDeferred<ApprovalDecision>? = null
     private var activeRun: Job? = null
+    @Volatile private var modelImport: Job? = null
 
     init {
         if (BuildConfig.FLAVOR == "demo") {
@@ -97,22 +98,34 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importModel(uri: Uri) {
-        if (state.value.isRunning) return
-        state.update { it.copy(modelStatus = "Copying model into private storage…", error = null) }
-        viewModelScope.launch(Dispatchers.IO) {
+        if (state.value.isRunning || modelImport?.isActive == true) return
+        state.update { it.copy(modelReady = false, modelStatus = "Copying model into private storage…", error = null) }
+        modelImport = viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val priorModel = modelManager.installedPath()
                 val staged = withContext(Dispatchers.IO) { modelManager.stage(uri) }
+                var promoted = false
                 try {
                     state.update { it.copy(modelStatus = "Health-checking ${formatBytes(staged.model.sizeBytes)} staged model (${staged.model.sha256.take(12)}…)") }
                     runtime.close()
                     runtime.initialize(staged.model.path)
                     runtime.close()
                     val model = modelManager.promote(staged)
+                    promoted = true
                     runtime.initialize(model.path)
+                    modelManager.completePromotion()
                 } catch (error: Exception) {
-                    modelManager.discard(staged)
-                    if (priorModel != null) runCatching { runtime.initialize(priorModel) }
+                    runtime.close()
+                    if (promoted) {
+                        modelManager.rollbackPromotion()
+                    } else {
+                        modelManager.discard(staged)
+                    }
+                    if (priorModel != null) {
+                        runCatching {
+                            modelManager.installedPath()?.let { runtime.initialize(it) }
+                        }
+                    }
                     throw error
                 }
             }.onSuccess {
@@ -125,13 +138,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         error = error.message ?: "Model import failed",
                     )
                 }
+                if (error is CancellationException) throw error
             }
+            if (modelImport === coroutineContext[Job]) modelImport = null
         }
     }
 
     fun send(goal: String) {
         val normalized = goal.trim()
-        if (normalized.isEmpty() || !runtime.isReady || state.value.isRunning) return
+        if (normalized.isEmpty() || !runtime.isReady || state.value.isRunning || modelImport?.isActive == true) return
         state.update {
             it.copy(
                 isRunning = true,
@@ -265,6 +280,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         cancelRun()
+        modelImport?.cancel()
         approvalDeferred?.cancel()
         runtime.close()
         super.onCleared()
