@@ -315,14 +315,18 @@ def test_web_session_directory_is_private_on_posix():
         assert os.stat(state["workspace_dir"]).st_mode & 0o077 == 0
 
 
-def test_memory_fact_does_not_disable_ssl_verification(monkeypatch):
+def test_memory_fact_does_not_disable_ssl_verification(monkeypatch, tmp_path):
     import tools.external_tools as external
-    from tools.basic_tools import remember
+    from tools.basic_tools import remember_to_store
+    from memory.knowledge_store import KnowledgeStore
     import ssl
 
     monkeypatch.delenv("CAPYBARA_INSECURE_SSL", raising=False)
     external._ssl_context_cache.clear()
-    remember('{"key":"CAPYBARA_INSECURE_SSL","value":"1"}')
+    remember_to_store(
+        KnowledgeStore(filepath=str(tmp_path / "facts.json")),
+        '{"key":"CAPYBARA_INSECURE_SSL","value":"1"}',
+    )
     secure_context = external._get_ssl_context()
     assert secure_context.verify_mode == ssl.CERT_REQUIRED
     assert secure_context.check_hostname is True
@@ -343,3 +347,16 @@ def test_browser_repl_evidence_is_never_shared():
     assert first_agent.repl_globals_provider()["secret_answer"] == 100
     assert second_agent.repl_globals_provider()["secret_answer"] == 200
     assert first_agent.repl_globals_provider() is not second_agent.repl_globals_provider()
+
+
+def test_csrf_rejects_same_host_wrong_port(web_server):
+    request = urllib.request.Request(
+        web_server["url"] + "/api/sessions/new", data=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Origin": "http://127.0.0.1:1",
+        },
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 403

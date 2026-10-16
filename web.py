@@ -337,7 +337,13 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
         if origin:
             parsed_origin = urllib.parse.urlparse(origin)
-            if parsed_origin.scheme not in {"http", "https"} or parsed_origin.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            # Match the full origin (including port), not merely "localhost".
+            # This also permits a TLS-terminating reverse proxy's own origin.
+            request_authority = self.headers.get("Host", "").lower()
+            if (parsed_origin.scheme not in {"http", "https"}
+                    or parsed_origin.netloc.lower() != request_authority
+                    or parsed_origin.username is not None
+                    or parsed_origin.password is not None):
                 self._send_json({"error": "Forbidden: cross-origin request"}, status=403)
                 return
         try:
