@@ -3,9 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// A release importing a model must explicitly pin its SHA-256. Debug builds
+// may import a locally provided model for testing; this is NOT a signature.
+val approvedModelSha256 = providers.gradleProperty("tervoroApprovedModelSha256")
+    .orElse("")
+    .get()
+    .lowercase()
+require(approvedModelSha256.isEmpty() || approvedModelSha256.matches(Regex("[0-9a-f]{64}"))) {
+    "tervoroApprovedModelSha256 must be an exact 64-character SHA-256 digest"
+}
+
 android {
     namespace = "com.tervoro.capybara"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.tervoro.capybara"
@@ -13,6 +23,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "APPROVED_MODEL_SHA256", "\"$approvedModelSha256\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -75,6 +86,7 @@ dependencies {
     "litertImplementation"("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
 
     testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")

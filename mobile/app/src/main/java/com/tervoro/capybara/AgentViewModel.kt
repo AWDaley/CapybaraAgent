@@ -70,50 +70,83 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     )
     private var approvalDeferred: CompletableDeferred<ApprovalDecision>? = null
     private var activeRun: Job? = null
+    @Volatile private var modelImport: Job? = null
 
     init {
-        val installedPath = modelManager.installedPath()
-        if (BuildConfig.FLAVOR == "demo" || installedPath != null) {
-            initializeRuntime(installedPath)
+        if (BuildConfig.FLAVOR == "demo") {
+            initializeRuntime(null)
         } else {
-            state.update {
-                it.copy(modelStatus = "Import a .litertlm model to begin", modelReady = false)
+            // Hash-verifying multi-gigabyte model packages must not block UI.
+            viewModelScope.launch(Dispatchers.IO) {
+                val installed = runCatching { modelManager.installedPath() }.getOrNull()
+                if (installed != null) {
+                    initializeRuntime(installed)
+                } else {
+                    state.update {
+                        it.copy(
+                            modelStatus = if (BuildConfig.DEBUG) {
+                                "Import a .litertlm model to begin"
+                            } else {
+                                "Import an approved .litertlm model (pinned SHA-256 required)"
+                            },
+                            modelReady = false,
+                        )
+                    }
+                }
             }
         }
     }
 
     fun importModel(uri: Uri) {
-        if (state.value.isRunning) return
-        state.update { it.copy(modelStatus = "Copying model into private storage…", error = null) }
-        viewModelScope.launch(Dispatchers.IO) {
+        if (state.value.isRunning || modelImport?.isActive == true) return
+        state.update { it.copy(modelReady = false, modelStatus = "Copying model into private storage…", error = null) }
+        modelImport = viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val priorModel = modelManager.installedPath()
                 val staged = withContext(Dispatchers.IO) { modelManager.stage(uri) }
+                var promoted = false
                 try {
                     state.update { it.copy(modelStatus = "Health-checking ${formatBytes(staged.model.sizeBytes)} staged model (${staged.model.sha256.take(12)}…)") }
                     runtime.close()
                     runtime.initialize(staged.model.path)
                     runtime.close()
                     val model = modelManager.promote(staged)
+                    promoted = true
                     runtime.initialize(model.path)
+                    modelManager.completePromotion()
                 } catch (error: Exception) {
-                    modelManager.discard(staged)
-                    if (priorModel != null) runCatching { runtime.initialize(priorModel) }
+                    runtime.close()
+                    if (promoted) {
+                        modelManager.rollbackPromotion()
+                    } else {
+                        modelManager.discard(staged)
+                    }
+                    if (priorModel != null) {
+                        runCatching {
+                            modelManager.installedPath()?.let { runtime.initialize(it) }
+                        }
+                    }
                     throw error
                 }
             }.onSuccess {
                 state.update { it.copy(modelReady = true, modelStatus = "Ready · ${runtime.displayName}", error = null) }
             }.onFailure { error ->
                 state.update {
-                    it.copy(modelReady = false, modelStatus = "Model unavailable", error = error.message ?: "Model import failed")
+                    it.copy(
+                        modelReady = runtime.isReady,
+                        modelStatus = if (runtime.isReady) "Previous model restored" else "Model unavailable",
+                        error = error.message ?: "Model import failed",
+                    )
                 }
+                if (error is CancellationException) throw error
             }
+            if (modelImport === coroutineContext[Job]) modelImport = null
         }
     }
 
     fun send(goal: String) {
         val normalized = goal.trim()
-        if (normalized.isEmpty() || !runtime.isReady || state.value.isRunning) return
+        if (normalized.isEmpty() || !runtime.isReady || state.value.isRunning || modelImport?.isActive == true) return
         state.update {
             it.copy(
                 isRunning = true,
@@ -202,7 +235,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         active.cancel(CancellationException("Task cancelled by user"))
     }
 
-    fun resolveApproval(decision: ApprovalDecision) {
+    fun resolveApproval(requestId: String, decision: ApprovalDecision) {
+        // Android authentication callbacks can arrive after cancellation or
+        // after a new task starts. Bind the callback to its original request.
+        if (state.value.pendingApproval?.requestId != requestId) return
         approvalDeferred?.complete(decision)
         approvalDeferred = null
         state.update { it.copy(pendingApproval = null) }
@@ -227,11 +263,24 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val deferred = CompletableDeferred<ApprovalDecision>()
         approvalDeferred = deferred
         state.update { it.copy(pendingApproval = request, phase = "waiting for approval") }
-        return deferred.await()
+        try {
+            return deferred.await()
+        } finally {
+            // Ensure cancellation/expiry does not strand an approval sheet.
+            if (approvalDeferred === deferred) {
+                approvalDeferred = null
+                state.update {
+                    if (it.pendingApproval?.requestId == request.requestId) {
+                        it.copy(pendingApproval = null)
+                    } else it
+                }
+            }
+        }
     }
 
     override fun onCleared() {
         cancelRun()
+        modelImport?.cancel()
         approvalDeferred?.cancel()
         runtime.close()
         super.onCleared()

@@ -1,11 +1,14 @@
 package com.tervoro.capybara.slm
 
 import android.content.Context
+import java.security.MessageDigest
 import com.tervoro.tal.LocalSlmRuntime
 import kotlinx.serialization.json.JsonPrimitive
 
 @Suppress("UNUSED_PARAMETER")
-fun buildSlmRuntime(context: Context): LocalSlmRuntime = DeterministicDemoSlmRuntime()
+fun buildSlmRuntime(context: Context): LocalSlmRuntime = createDeterministicDemoRuntime()
+
+internal fun createDeterministicDemoRuntime(): LocalSlmRuntime = DeterministicDemoSlmRuntime()
 
 private class DeterministicDemoSlmRuntime : LocalSlmRuntime {
     override val displayName = "Deterministic TAL demo"
@@ -31,11 +34,16 @@ private class DeterministicDemoSlmRuntime : LocalSlmRuntime {
             return """{"type":"action","thought":"Read the phone clock","tool":"current_time","args":{}}"""
         }
         if (goal.contains("document", ignoreCase = true) || goal.contains("summar", ignoreCase = true)) {
-            return """{\"type\":\"action\",\"thought\":\"Read only the user-selected document\",\"tool\":\"document.selected.read\",\"args\":{}}"""
+            return """{"type":"action","thought":"Read only the user-selected document","tool":"document.selected.read","args":{}}"""
         }
         if (goal.contains("note", ignoreCase = true) || goal.contains("remember", ignoreCase = true)) {
             val safeValue = JsonPrimitive(goal.take(500))
-            return """{"type":"action","thought":"Store the requested text in encrypted local storage","tool":"note.create","args":{"idempotency_key":"effect:quick-note","key":"quick-note","value":$safeValue}}"""
+            // Retries of the same goal keep the same key; different goals
+            // cannot accidentally reuse one action's idempotency identity.
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(goal.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }.take(24)
+            return """{"type":"action","thought":"Store the requested text in encrypted local storage","tool":"note.create","args":{"idempotency_key":"effect:quick-note-$digest","key":"quick-note","value":$safeValue}}"""
         }
         val answer = JsonPrimitive("The deterministic demo received: ${goal.take(500)}")
         return """{"type":"complete","thought":"No tool effect is required","final_answer":$answer}"""
