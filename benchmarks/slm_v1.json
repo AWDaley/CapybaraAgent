@@ -9,7 +9,21 @@
       "difficulty": "easy",
       "prompt": "Use the calculator tool to compute (184 * 37) - 95. State the result.",
       "acceptance": "The final answer contains the exact calculated value.",
-      "tags": ["calculator", "structured_action"]
+      "tags": [
+        "calculator",
+        "structured_action"
+      ],
+      "oracle": {
+        "final_contains_all": [
+          "6713"
+        ],
+        "tool_observations": [
+          {
+            "tool": "calc",
+            "contains": "6713"
+          }
+        ]
+      }
     },
     {
       "case_id": "verified_python_state",
@@ -17,7 +31,11 @@
       "difficulty": "medium",
       "prompt": "Use python_repl to create a list named benchmark_numbers containing the squares of 1 through 10, then report its length and final value.",
       "acceptance": "The REPL state contains ten deterministic values and the response reports the expected length and final value.",
-      "tags": ["python_repl", "state", "verification"]
+      "tags": [
+        "python_repl",
+        "state",
+        "verification"
+      ]
     },
     {
       "case_id": "diagnostic_repair",
@@ -25,7 +43,11 @@
       "difficulty": "hard",
       "prompt": "Create a small Python data transformation in python_repl, verify its output is a dictionary with keys total and average, and repair any syntax or schema error before completing.",
       "acceptance": "Completion follows a successful deterministic state check after any required repair.",
-      "tags": ["repair", "schema", "python_repl"]
+      "tags": [
+        "repair",
+        "schema",
+        "python_repl"
+      ]
     },
     {
       "case_id": "distributed_saga_recovery",
@@ -33,7 +55,12 @@
       "difficulty": "endurance",
       "prompt": "Execute the distributed order saga, hash-chain audit, and fault-recovery workflow using small verified steps. Preserve canonical state, suppress duplicate recovery events, and emit verified artifacts.",
       "acceptance": "All pipeline stages and artifact contracts pass; the canonical ledger remains intact after duplicate suppression.",
-      "tags": ["pipeline", "checkpoint", "recovery", "regression"]
+      "tags": [
+        "pipeline",
+        "checkpoint",
+        "recovery",
+        "regression"
+      ]
     }
   ]
 }
