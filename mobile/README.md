@@ -18,13 +18,16 @@ This first vertical slice is intentionally narrow and executable:
 4. Run `./gradlew :tal-core:test :app:assembleDemoDebug` from the `mobile` directory.
 5. For real inference, select `litertDebug`, install the app on an arm64 phone, and use the add button to import a compatible `.litertlm` model.
 
-The project does not download a model. Release builds enforce a pinned SHA-256
-on imported and previously installed LiteRT-LM packages. Configure the Gradle
-property `tervoroApprovedModelSha256=<64-character digest>` for a production
-build; release without a valid pin refuses model activation. Debug builds can
-import unpinned models for local testing. A digest validates byte identity,
-**not model provenance, licensing, publisher identity, or a digital signature**;
-signed manifests and distribution policy remain required before production release.
+The project does not download a model. Release builds now require BOTH a signed
+model package descriptor and a pinned Tervoro publisher P-256 public key.
+The installer verifies the artifact SHA-256, publisher signature, expiration,
+revocation flag, runtime, device ABI/API, and TAL prompt profile before running
+the model, including after process restarts. A bare SHA-256 pin is **insufficient**
+for release activation. Configure `tervoroSignedModelDescriptorBase64` and
+`tervoroTrustedPublisherSpkiBase64` at trusted build time; an optional
+`tervoroApprovedModelSha256` can narrow the allowlist further. Never commit
+private signing keys. Debug builds with NO trust parameters can use unsigned
+test models only. See [Signed model deployment](../docs/MOBILE_SIGNED_MODEL_DEPLOYMENT.md).
 
 ## Current trust boundary
 
