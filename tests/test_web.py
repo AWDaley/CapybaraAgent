@@ -279,3 +279,50 @@ def test_web_rejects_other_browser_session_file(web_server):
     with pytest.raises(urllib.error.HTTPError) as error:
         browser2.open(request)
     assert error.value.code == 403
+
+
+def test_browser_memory_is_bound_to_its_session(tmp_path):
+    import uuid
+    import web
+    from tools.basic_tools import remember_to_store, recall_from_store
+
+    first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
+    first = web._get_web_session(first_id)
+    second = web._get_web_session(second_id)
+    remember_to_store(first["knowledge_store"], '{"key":"private_fact","value":"first"}')
+    assert recall_from_store(first["knowledge_store"], '{"key":"private_fact"}') == "first"
+    assert "not found" in recall_from_store(
+        second["knowledge_store"], '{"key":"private_fact"}'
+    ).lower()
+    one_agent = web.get_agent(first_id)
+    two_agent = web.get_agent(second_id)
+    assert one_agent.tools["recall"]('{"key":"private_fact"}') == "first"
+    assert "not found" in two_agent.tools["recall"](
+        '{"key":"private_fact"}'
+    ).lower()
+
+
+def test_web_session_directory_is_private_on_posix():
+    import os
+    import uuid
+    import web
+
+    state = web._get_web_session(str(uuid.uuid4()))
+    assert os.path.isdir(state["workspace_dir"])
+    assert state["workspace_dir"].startswith(state["session_manager"].sessions_dir)
+    if os.name == "posix":
+        assert os.stat(state["session_manager"].sessions_dir).st_mode & 0o077 == 0
+        assert os.stat(state["workspace_dir"]).st_mode & 0o077 == 0
+
+
+def test_memory_fact_does_not_disable_ssl_verification(monkeypatch):
+    import tools.external_tools as external
+    from tools.basic_tools import remember
+    import ssl
+
+    monkeypatch.delenv("CAPYBARA_INSECURE_SSL", raising=False)
+    external._ssl_context_cache.clear()
+    remember('{"key":"CAPYBARA_INSECURE_SSL","value":"1"}')
+    secure_context = external._get_ssl_context()
+    assert secure_context.verify_mode == ssl.CERT_REQUIRED
+    assert secure_context.check_hostname is True

@@ -138,40 +138,49 @@ def get_help(args: str = "") -> str:
         "- exit or quit: Stop the agent"
     )
 
-def remember(args: str) -> str:
-    """Saves a fact to the persistent knowledge store. Expects JSON args."""
+def remember_to_store(store: KnowledgeStore, args: str) -> str:
+    """Write a fact to the explicitly bound session store."""
     try:
         data = json.loads(args)
         key = data.get("key", "")
         value = data.get("value", "")
         if not key or not value:
             return "Error: Both 'key' and 'value' must be provided."
-        return _knowledge_store.save_fact(key, value)
+        return store.save_fact(key, value)
     except json.JSONDecodeError:
-        return "Error: Arguments must be valid JSON: {\"key\": \"...\", \"value\": \"...\"}"
-    except Exception as e:
-        return f"Error remembering fact: {e}"
+        return 'Error: Arguments must be valid JSON: {"key": "...", "value": "..."}'
+    except Exception as exc:
+        return f"Error remembering fact: {exc}"
 
-def recall(args: str = "") -> str:
-    """Retrieves a fact from the persistent knowledge store. Expects JSON args."""
+
+def recall_from_store(store: KnowledgeStore, args: str = "") -> str:
+    """Read facts exclusively from the supplied session store."""
     try:
-        # If no args, return all
-        if not args.strip():
-             facts = _knowledge_store.get_all_facts()
-             if not facts: return "I don't remember any facts yet."
-             return "All remembered facts:\n" + "\n".join(f"- {k}: {v}" for k, v in facts.items())
-             
-        data = json.loads(args)
+        data = json.loads(args) if args and args.strip() else {}
         key = data.get("key", "")
         if not key:
-            facts = _knowledge_store.get_all_facts()
-            if not facts: return "I don't remember any facts yet."
-            return "All remembered facts:\n" + "\n".join(f"- {k}: {v}" for k, v in facts.items())
-        return _knowledge_store.get_fact(key)
+            facts = store.get_all_facts()
+            if not facts:
+                return "I don't remember any facts yet."
+            return "All remembered facts:\n" + "\n".join(
+                f"- {name}: {value}" for name, value in facts.items()
+            )
+        return store.get_fact(key)
     except json.JSONDecodeError:
-        return "Error: Arguments must be valid JSON: {\"key\": \"...\"}"
-    except Exception as e:
-        return f"Error recalling fact: {e}"
+        return 'Error: Arguments must be valid JSON: {"key": "..."}'
+    except Exception as exc:
+        return f"Error recalling fact: {exc}"
+
+
+def remember(args: str) -> str:
+    """Legacy CLI storage; web agents bind to private session stores."""
+    return remember_to_store(_knowledge_store, args)
+
+
+def recall(args: str = "") -> str:
+    """Legacy CLI storage; web agents bind to private session stores."""
+    return recall_from_store(_knowledge_store, args)
+
 
 BASIC_TOOL_REGISTRY = {
     "calc": calculator,

@@ -1,4 +1,5 @@
 import hashlib
+from functools import partial
 import hmac
 import http.server
 import json
@@ -19,6 +20,7 @@ from memory import SessionManager
 from memory.knowledge_store import KnowledgeStore
 from planning_agent import PlanningAgent
 from tools import TOOL_REGISTRY
+from tools.basic_tools import remember_to_store, recall_from_store
 from tools.external_tools import create_repl_scope
 from tools.file_tools import workspace_scope
 from tal.safe_paths import resolve_workspace_path
@@ -128,6 +130,9 @@ def get_agent(session_id="legacy"):
         guardrails_flag = config.get("guardrails", True)
         
         scoped_tools = dict(TOOL_REGISTRY)
+        # Never expose module-global remember/recall state to a browser session.
+        scoped_tools["remember"] = partial(remember_to_store, state["knowledge_store"])
+        scoped_tools["recall"] = partial(recall_from_store, state["knowledge_store"])
         scoped_tools["python_repl"] = state["repl_scope"].run
         basic = BasicAgent(
             llm_client=llm,

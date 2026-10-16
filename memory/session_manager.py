@@ -23,7 +23,9 @@ class SessionManager:
             self.sessions_dir = os.path.join(root_sessions_dir, "clients", safe_namespace)
         else:
             self.sessions_dir = root_sessions_dir
-        os.makedirs(self.sessions_dir, exist_ok=True)
+        os.makedirs(self.sessions_dir, mode=0o700, exist_ok=True)
+        if session_namespace is not None and os.name == "posix":
+            os.chmod(self.sessions_dir, 0o700)
         self.current_session_file = None
         self.current_event_file = None
 
