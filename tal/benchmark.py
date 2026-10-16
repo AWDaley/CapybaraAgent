@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from tal.slm_profile import is_slm_model
-from tal_test_report import TALTestResult
+from tal_test_report import RunMetrics, TALTestResult
 from tal_test_runner import TALTestRunner
 
 
@@ -33,6 +33,75 @@ def _slug(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class AcceptanceOracle:
+    """Minimal deterministic benchmark oracle independent of agent self-reports.
+
+    A tool check matches the OBSERVED tool result, not model assertions about
+    tool use. Cases without a machine-checkable oracle are unscored.
+    """
+
+    final_contains_all: tuple[str, ...] = ()
+    tool_observations: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "AcceptanceOracle":
+        if not isinstance(raw, dict):
+            raise ValueError("Benchmark oracle must be a JSON object")
+        unexpected = set(raw) - {"final_contains_all", "tool_observations"}
+        if unexpected:
+            raise ValueError(f"Benchmark oracle has unsupported fields: {sorted(unexpected)}")
+        final = raw.get("final_contains_all", [])
+        observations = raw.get("tool_observations", [])
+        if not isinstance(final, list) or not all(isinstance(x, str) and x for x in final):
+            raise ValueError("oracle.final_contains_all must be a list of non-empty strings")
+        if not isinstance(observations, list) or not all(
+            isinstance(item, dict)
+            and set(item) == {"tool", "contains"}
+            and all(isinstance(item[key], str) and item[key] for key in ("tool", "contains"))
+            for item in observations
+        ):
+            raise ValueError("oracle.tool_observations must contain exact tool/contains objects")
+        if not final and not observations:
+            raise ValueError("Benchmark oracle must specify at least one independent check")
+        return cls(
+            final_contains_all=tuple(final),
+            tool_observations=tuple((item["tool"], item["contains"]) for item in observations),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "final_contains_all": list(self.final_contains_all),
+            "tool_observations": [
+                {"tool": tool, "contains": expected}
+                for tool, expected in self.tool_observations
+            ],
+        }
+
+    def evaluate(self, run: RunMetrics) -> bool:
+        if not run.success or run.error:
+            return False
+        answer = str(run.final_answer or "")
+        if any(expected not in answer for expected in self.final_contains_all):
+            return False
+        for tool, expected in self.tool_observations:
+            matched = False
+            for observation in run.tools_called:
+                name = str(observation.get("tool", "")).rsplit("] ", 1)[-1]
+                result = str(observation.get("result", ""))
+                if (
+                    name == tool
+                    and expected in result
+                    and not result.lstrip().lower().startswith("error")
+                    and "DENIED" not in result
+                ):
+                    matched = True
+                    break
+            if not matched:
+                return False
+        return True
+
+
+@dataclass(frozen=True)
 class BenchmarkCase:
     """One immutable prompt-oriented benchmark case."""
 
@@ -42,6 +111,7 @@ class BenchmarkCase:
     prompt: str
     acceptance: str = ""
     tags: tuple[str, ...] = ()
+    oracle: AcceptanceOracle | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BenchmarkCase":
@@ -62,11 +132,16 @@ class BenchmarkCase:
             prompt=str(data["prompt"]),
             acceptance=str(data.get("acceptance", "")),
             tags=tuple(raw_tags),
+            oracle=AcceptanceOracle.from_dict(data["oracle"]) if "oracle" in data else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["tags"] = list(self.tags)
+        if self.oracle is None:
+            data.pop("oracle")
+        else:
+            data["oracle"] = self.oracle.to_dict()
         return data
 
 
@@ -128,6 +203,8 @@ class BenchmarkTrial:
     repetition: int
     seed: int | None
     result: TALTestResult
+    baseline_oracle_passed: bool | None = None
+    tal_oracle_passed: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,6 +214,8 @@ class BenchmarkTrial:
             "repetition": self.repetition,
             "seed": self.seed,
             "result": self.result.to_dict(),
+            "baseline_oracle_passed": self.baseline_oracle_passed,
+            "tal_oracle_passed": self.tal_oracle_passed,
         }
 
 
@@ -159,14 +238,32 @@ class BenchmarkScorecard:
 
     def summary(self) -> dict[str, Any]:
         def summarize(items: list[BenchmarkTrial]) -> dict[str, Any]:
-            baseline_success = [item.result.baseline.success and item.result.baseline.outcome == "verified" for item in items]
-            tal_success = [item.result.tal.success and item.result.tal.outcome == "verified" for item in items]
+            baseline_success = [
+                item.baseline_oracle_passed for item in items
+                if item.baseline_oracle_passed is not None
+            ]
+            tal_success = [
+                item.tal_oracle_passed for item in items
+                if item.tal_oracle_passed is not None
+            ]
+            scorable = len(tal_success)
             total_tool_calls = sum(item.result.tal.tool_call_count for item in items)
             total_tool_errors = sum(item.result.tal.tool_error_count for item in items)
             return {
                 "trials": len(items),
-                "baseline_verified_success_rate": _rate(baseline_success),
-                "tal_verified_success_rate": _rate(tal_success),
+                "scored_trials": scorable,
+                "unscored_trials": len(items) - scorable,
+                "oracle_coverage": round(scorable / len(items), 4) if items else 0.0,
+                # Never silently count a prose-only acceptance description as a
+                # machine-verified failure (or a machine-verified success).
+                "baseline_verified_success_rate": _rate(baseline_success) if scorable else None,
+                "tal_verified_success_rate": _rate(tal_success) if scorable else None,
+                "baseline_agent_reported_verified_rate": _rate([
+                    item.result.baseline.outcome == "verified" for item in items
+                ]),
+                "tal_agent_reported_verified_rate": _rate([
+                    item.result.tal.outcome == "verified" for item in items
+                ]),
                 "baseline_median_tokens": _median([item.result.baseline.total_tokens for item in items]),
                 "tal_median_tokens": _median([item.result.tal.total_tokens for item in items]),
                 "baseline_median_wall_seconds": _median([item.result.baseline.wall_clock_time for item in items]),
@@ -252,6 +349,12 @@ class SLMBenchmarkRunner:
                 repetition=repetition,
                 seed=trial_seed,
                 result=result,
+                baseline_oracle_passed=(
+                    case.oracle.evaluate(result.baseline) if case.oracle else None
+                ),
+                tal_oracle_passed=(
+                    case.oracle.evaluate(result.tal) if case.oracle else None
+                ),
             ))
         return scorecard
 
