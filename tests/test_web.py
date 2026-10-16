@@ -232,14 +232,14 @@ def test_invalid_cookie_is_not_an_ownership_credential(web_server):
     assert "invalid" not in new_cookie
 
 
-def test_workspace_context_flows_into_tool_worker(temp_workspace):
+def test_workspace_context_flows_into_tool_worker(tmp_path):
     from pathlib import Path
     from agent import BasicAgent
     from tal.context_packer import ExecutionPhase
     from tools.file_tools import read_file, workspace_scope
 
-    first = Path(temp_workspace, "a")
-    second = Path(temp_workspace, "b")
+    first = Path(tmp_path, "a")
+    second = Path(tmp_path, "b")
     first.mkdir()
     second.mkdir()
     (first / "note.txt").write_text("from-a", encoding="utf-8")
