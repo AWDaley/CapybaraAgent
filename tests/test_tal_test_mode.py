@@ -272,12 +272,10 @@ def test_tal_runner_planning_mode(test_dir):
         '{"thought": "Step 1 done", "action": null, "final_answer": "File written"}',
         # Baseline Step 2: execute step
         '{"thought": "Step 2 done", "action": null, "final_answer": "Finished"}',
-        # TAL: Plan generation
-        "1. Write hello to file\n2. Done",
-        # TAL Step 1: execute step
-        '{"thought": "Step 1 done TAL", "action": null, "final_answer": "File written"}',
-        # TAL Step 2: execute step
-        '{"thought": "Step 2 done TAL", "action": null, "final_answer": "Finished"}',
+        # TAL: typed graph replaces the old numbered-plan path.
+        '{"graph_id":"test","title":"Test","nodes":[{"node_id":"first","objective":"Produce a read-only summary","specialist":"general","tool_allowlist":["calc"],"max_retries":0,"verification_criteria":[{"type":"non_empty","output":"observed"}]}]}',
+        # TAL specialist response followed by declarative acceptance.
+        '{"thought": "Step 1 done TAL", "action": null, "final_answer": "Finished"}',
     ])
 
     runner = TALTestRunner(

@@ -63,12 +63,13 @@ def _terminal_outcome(agent) -> str:
     """Expose only trustworthy task-wide statuses to the web interface."""
     from tal.outcomes import OutcomeStatus
 
-    # Planning/orchestration currently do not provide one unified task-wide
-    # verification result. Their step-level evidence must not be promoted to a
-    # verified overall task until Phase 2 unifies execution paths.
-    if not isinstance(agent, BasicAgent):
+    # Step-level checks never independently establish the full user goal.
+    event_log = getattr(agent, "event_log", None)
+    if isinstance(agent, PlanningAgent):
+        event_log = agent.basic_agent.event_log
+    if event_log is None:
         return OutcomeStatus.COMPLETED_UNVERIFIED.value
-    for event in reversed(agent.event_log.events):
+    for event in reversed(event_log.events):
         if event.event_type == "task_outcome":
             return event.data.get("status", OutcomeStatus.COMPLETED_UNVERIFIED.value)
     return OutcomeStatus.COMPLETED_UNVERIFIED.value

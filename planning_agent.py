@@ -6,6 +6,8 @@ from agent import BasicAgent
 from llm_client import LLMClient
 from tal.context_packer import ExecutionPhase
 from tal.manifest import TaskManifest
+from tal.event_store import EventLog
+from tal.outcomes import OutcomeStatus
 from tal.repair import repair_json_string
 from tal.task_graph import TaskGraph, TaskGraphRunner, TaskGraphValidationError
 from tal.verification import run_verification
@@ -18,6 +20,8 @@ class PlanningAgent:
         self.llm_client = llm_client
         self.tal_mode = tal_mode or getattr(basic_agent, "tal_mode", False)
         self.manifest: TaskManifest | None = None
+        self.last_task_graph_result = None
+        self.last_outcome = OutcomeStatus.COMPLETED_UNVERIFIED.value
         
         # We need a specific system prompt just for planning
         self.planner_prompt = (
@@ -103,7 +107,7 @@ class PlanningAgent:
         except (json.JSONDecodeError, TaskGraphValidationError, ValueError, TypeError) as exc:
             raise TaskGraphValidationError(f"Planner did not emit a valid task graph: {exc}") from exc
 
-    def execute_task_graph(self, graph: TaskGraph, approval_callback=None) -> str:
+    def execute_task_graph(self, graph: TaskGraph, approval_callback=None, on_thought=None, on_specialist_event=None) -> str:
         """Execute a validated graph through the existing verified pipeline runner."""
         from tal.pipeline_runner import StructuredPipelineRunner
         from tools.file_tools import WORKSPACE_DIR
@@ -118,13 +122,22 @@ class PlanningAgent:
             use_slm_profile=self.basic_agent.use_slm_profile,
             tool_registry=self.basic_agent.tools,
         )
-        graph_result = TaskGraphRunner(pipeline_runner).run(graph, approval_callback=approval_callback)
+        graph_result = TaskGraphRunner(pipeline_runner).run(
+            graph, approval_callback=approval_callback,
+            on_thought=on_thought, on_specialist_event=on_specialist_event,
+        )
         self.last_task_graph_result = graph_result
         for event in pipeline_runner.event_log.events:
             self.basic_agent.event_log.append(event.event_type, event.data, timestamp=event.timestamp)
         answer = graph_result.pipeline_result.final_output
-        if graph_result.pipeline_result.error:
-            answer += f"\n\nTask graph execution incomplete: {graph_result.pipeline_result.error}"
+        self.last_outcome = (
+            OutcomeStatus.COMPLETED_UNVERIFIED.value if graph_result.success
+            else OutcomeStatus.FAILED.value
+        )
+        self.basic_agent.event_log.append("task_outcome", {"status": self.last_outcome})
+        if not graph_result.success:
+            reason = graph_result.pipeline_result.error or "The task graph did not pass all gates"
+            answer = f"{answer}\n\nTask graph execution incomplete: {reason}".strip()
         return answer
 
     def re_plan(self, original_goal: str, completed: list[str], failed_step: str, remaining: list[str], error_context: str) -> list[str]:
@@ -225,77 +238,89 @@ class PlanningAgent:
         )
         return summary or "All steps completed successfully."
 
-    def run(self, goal: str, approval_callback=None) -> str:
-        """Top-level entry point: Plan -> Execute"""
+
+    def _execute(self, goal: str, approval_callback=None, on_thought=None,
+                 on_specialist_event=None) -> str:
+        """One planning/execution path for CLI, trace, and SSE."""
+        self.last_task_graph_result = None
+        self.last_outcome = OutcomeStatus.COMPLETED_UNVERIFIED.value
         if self.tal_mode:
+            self.basic_agent.event_log = EventLog()
+            if on_thought:
+                on_thought("Planning a governed TAL task graph...")
             try:
                 graph = self.plan_task_graph(goal)
             except TaskGraphValidationError as exc:
+                self.last_outcome = OutcomeStatus.FAILED.value
+                self.basic_agent.event_log.append("task_outcome", {
+                    "status": self.last_outcome, "reason": str(exc),
+                })
                 return f"Could not generate a valid task graph: {exc}"
-            return self.execute_task_graph(graph, approval_callback=approval_callback)
-        logger.info("\n🤔 Thinking of a plan...")
+            if on_thought:
+                on_thought(f"Validated task graph '{graph.title}' with {len(graph.nodes)} nodes.")
+            return self.execute_task_graph(
+                graph, approval_callback=approval_callback,
+                on_thought=on_thought, on_specialist_event=on_specialist_event,
+            )
+        if on_thought:
+            on_thought("Planning the task...")
         plan = self.plan(goal)
+        if not plan:
+            self.last_outcome = OutcomeStatus.FAILED.value
+            return "Could not generate a valid plan."
+        if on_thought:
+            on_thought("Generated Plan:\n" + "\n".join(
+                f"{i + 1}. {step}" for i, step in enumerate(plan)
+            ))
         return self.execute_plan(goal, plan, approval_callback=approval_callback)
 
+    def run(self, goal: str, approval_callback=None) -> str:
+        """Execute using the same path as the web UI."""
+        return self._execute(goal, approval_callback=approval_callback)
+
     def run_with_trace(self, goal: str, approval_callback=None) -> dict:
-        """Runs the planning agent and returns structured trace data for the web UI."""
-        trace = {
-            "response": "",
-            "thoughts": [],
-            "tools_used": []
-        }
-        
-        trace["thoughts"].append("Thinking of a plan...")
-        plan = self.plan(goal)
-        
-        if not plan:
-             trace["response"] = "Could not generate a valid plan."
-             return trace
-             
-        trace["thoughts"].append("Generated Plan:\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan)))
-        
-        result = self.execute_plan(goal, plan, approval_callback=approval_callback)
-        trace["response"] = result
+        """Capture structured events without a separate execution implementation."""
+        trace = {"response": "", "thoughts": [], "tools_used": []}
+
+        def collect(spec, event_type, data):
+            prefix = f"[{spec.upper()}] "
+            if event_type == "thought":
+                trace["thoughts"].append(prefix + str(data.get("content", "")))
+            elif event_type == "tool_start":
+                trace["tools_used"].append({
+                    "name": prefix + str(data.get("name", "")),
+                    "args": data.get("args", ""), "result": "",
+                })
+            elif event_type == "tool_result":
+                for item in reversed(trace["tools_used"]):
+                    if item["name"] == prefix + str(data.get("name", "")) and not item["result"]:
+                        item["result"] = data.get("result", "")
+                        break
+
+        trace["response"] = self._execute(
+            goal, approval_callback=approval_callback,
+            on_thought=trace["thoughts"].append, on_specialist_event=collect,
+        )
+        trace["outcome"] = self.last_outcome
         return trace
 
     def run_streaming(self, goal: str, callback, approval_callback=None) -> None:
-        """Runs the planning agent, emitting events via callback."""
-        callback("thought", {"content": "Thinking of a plan..."})
-        plan = self.plan(goal)
-        
-        if not plan:
-             callback("error", {"content": "Could not generate a valid plan."})
-             return
-             
-        plan_str = "Generated Plan:\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
-        callback("thought", {"content": plan_str})
-        
-        context = ""
-        step_results = []
-        for i, step in enumerate(plan):
-            callback("thought", {"content": f"Executing Step {i+1}: {step}"})
-            
-            instruction = f"Goal: {goal}\nCurrent Step: {step}"
-            if context:
-                instruction += f"\n\nContext from previous steps:\n{context}"
-                
-            final_outputs = []
-            def intercept(event_type, data):
-                if event_type in ("answer", "error"):
-                    final_outputs.append(data.get("content", ""))
-                callback(event_type, data)
+        """Stream the common governed executor, never the old numbered plan loop."""
+        def forward(spec, event_type, data):
+            if event_type in {"tool_start", "tool_result", "thought"}:
+                item = dict(data)
+                if event_type in {"tool_start", "tool_result"}:
+                    item["name"] = f"[{spec.upper()}] {item.get('name', '')}"
+                else:
+                    item["content"] = f"[{spec.upper()}] {item.get('content', '')}"
+                callback(event_type, item)
 
-            self.basic_agent.run_turn_streaming(instruction, intercept, max_steps=10, approval_callback=approval_callback, new_task=False)
-            
-            # Extract step output from basic_agent memory to build context for next steps
-            if self.basic_agent.memory:
-                last_msg = self.basic_agent.memory[-1]
-                step_res = last_msg.get("content", "")
-                context += f"Step {i+1} ({step}): {step_res[:300]}\n"
-            if final_outputs:
-                step_results.append((step, final_outputs[-1]))
-            
-        final_summary = "\n\n".join(
-            f"Step {index}: {step}\n{result}" for index, (step, result) in enumerate(step_results, 1)
+        answer = self._execute(
+            goal, approval_callback=approval_callback,
+            on_thought=lambda message: callback("thought", {"content": message}),
+            on_specialist_event=forward,
         )
-        callback("answer", {"content": final_summary or f"Finished executing plan for goal: {goal}"})
+        if self.last_outcome == OutcomeStatus.FAILED.value:
+            callback("error", {"content": answer})
+        else:
+            callback("answer", {"content": answer})
