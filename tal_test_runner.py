@@ -270,6 +270,7 @@ class TALTestRunner:
         verification_passed = None
         verification_messages = []
         events_count = 0
+        outcome = "completed_unverified"
         steps_taken = tracking_llm.llm_calls
 
         if agent_instance:
@@ -286,6 +287,8 @@ class TALTestRunner:
                     elif evt.event_type == "verification_run":
                         verification_passed = evt.data.get("passed")
                         verification_messages = evt.data.get("messages", [])
+                    elif evt.event_type == "task_outcome":
+                        outcome = evt.data.get("status", outcome)
 
             if hasattr(agent_instance, "epistemic_store") and agent_instance.epistemic_store:
                 epistemic_facts = [
@@ -300,6 +303,10 @@ class TALTestRunner:
         outcome_success = bool(final_answer.strip()) and error_msg is None
         if requires_verification:
             outcome_success = outcome_success and verification_passed is True
+        if not outcome_success:
+            outcome = "failed"
+        elif verification_passed is True:
+            outcome = "verified"
 
         return RunMetrics(
             mode=self.mode,
@@ -323,6 +330,7 @@ class TALTestRunner:
             epistemic_fact_count=len(epistemic_facts),
             epistemic_facts=epistemic_facts,
             verification_passed=verification_passed,
+            outcome=outcome,
             verification_messages=verification_messages,
             events_count=events_count,
         )

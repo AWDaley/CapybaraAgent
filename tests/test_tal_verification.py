@@ -288,3 +288,46 @@ def test_ast_syntax_check():
         passed, msg = check_bad.check(workspace_dir=tmpdir)
         assert passed is False
         assert "SyntaxError" in msg
+
+
+def test_missing_acceptance_criteria_cannot_claim_verified_completion():
+    passed, messages = run_verification([])
+    assert passed is False
+    assert "unverified" in messages[0]
+
+
+def test_fresh_file_does_not_accept_stale_content(temp_workspace):
+    from tal.verification import initial_workspace_digest, FreshFileCheck
+
+    target = os.path.join(temp_workspace, "report.txt")
+    with open(target, "w", encoding="utf-8") as f:
+        f.write("stale content")
+    baseline = initial_workspace_digest(temp_workspace, "report.txt")
+    gate = FreshFileCheck("report.txt", baseline)
+    passed, _ = gate.check(temp_workspace)
+    assert not passed
+    with open(target, "w", encoding="utf-8") as f:
+        f.write("new content")
+    passed, _ = gate.check(temp_workspace)
+    assert passed
+
+
+def test_model_completion_without_criteria_is_unverified():
+    from agent import BasicAgent
+    from tal.outcomes import OutcomeStatus
+    from llm_client import LLMClient
+
+    class ScriptedLLM(LLMClient):
+        def __init__(self):
+            super().__init__("scripted")
+        def generate(self, messages, json_mode=False, timeout_seconds=None, response_schema=None):
+            return '{"type":"complete","thought":"","final_answer":"done"}'
+        def generate_with_retry(self, *args, **kwargs):
+            return self.generate([])
+        @staticmethod
+        def list_models():
+            return []
+
+    agent = BasicAgent(llm_client=ScriptedLLM(), tal_mode=True)
+    result = agent.run_turn_with_trace("Answer a conversational question", max_steps=2)
+    assert result["outcome"] == OutcomeStatus.COMPLETED_UNVERIFIED.value

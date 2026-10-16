@@ -159,8 +159,10 @@ class BenchmarkScorecard:
 
     def summary(self) -> dict[str, Any]:
         def summarize(items: list[BenchmarkTrial]) -> dict[str, Any]:
-            baseline_success = [item.result.baseline.success for item in items]
-            tal_success = [item.result.tal.success for item in items]
+            baseline_success = [item.result.baseline.success and item.result.baseline.outcome == "verified" for item in items]
+            tal_success = [item.result.tal.success and item.result.tal.outcome == "verified" for item in items]
+            total_tool_calls = sum(item.result.tal.tool_call_count for item in items)
+            total_tool_errors = sum(item.result.tal.tool_error_count for item in items)
             return {
                 "trials": len(items),
                 "baseline_verified_success_rate": _rate(baseline_success),
@@ -169,7 +171,8 @@ class BenchmarkScorecard:
                 "tal_median_tokens": _median([item.result.tal.total_tokens for item in items]),
                 "baseline_median_wall_seconds": _median([item.result.baseline.wall_clock_time for item in items]),
                 "tal_median_wall_seconds": _median([item.result.tal.wall_clock_time for item in items]),
-                "tal_tool_error_rate": _rate([item.result.tal.tool_error_count == 0 for item in items]),
+                "tal_tool_error_rate": round(total_tool_errors / total_tool_calls, 4) if total_tool_calls else 0.0,
+                "tal_zero_tool_error_run_rate": _rate([item.result.tal.tool_error_count == 0 for item in items]),
                 "tal_verification_rate": _rate([item.result.tal.verification_passed is True for item in items]),
             }
 

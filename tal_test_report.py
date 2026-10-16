@@ -30,6 +30,7 @@ class RunMetrics:
     epistemic_facts: list[dict[str, Any]] = field(default_factory=list)
     verification_passed: bool | None = None
     verification_messages: list[str] = field(default_factory=list)
+    outcome: str = "completed_unverified"
     events_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:

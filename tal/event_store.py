@@ -34,7 +34,7 @@ class TaskState:
     facts: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    status: str = "active"  # active | waiting_for_user | completed | escalated | blocked
+    status: str = "active"  # active | verified | completed_unverified | failed | escalated | waiting_for_user
     final_answer: str | None = None
     verification_passed: bool | None = None
 
@@ -84,8 +84,11 @@ def state_reducer(state: TaskState, event: TaskEvent) -> TaskState:
             state.errors.append(f"Verification failed: {edata.get('failures', [])}")
 
     elif etype == "task_completed":
-        state.status = "completed"
+        state.status = edata.get("outcome", "completed")
         state.final_answer = edata.get("answer", state.final_answer)
+
+    elif etype == "task_outcome":
+        state.status = edata.get("status", state.status)
 
     elif etype == "task_escalated":
         state.status = "escalated"

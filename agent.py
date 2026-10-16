@@ -25,6 +25,7 @@ from tal.epistemic import EpistemicState, EpistemicStore
 from tal.event_store import EventLog
 from tal.execution import ExecutionErrorCode, ToolResult, classify_legacy_tool_output
 from tal.manifest import TaskManifest
+from tal.outcomes import OutcomeStatus
 from tal.proposal_types import (
     ActionProposal,
     CompleteProposal,
@@ -197,19 +198,33 @@ class BasicAgent:
         self.llm_call_count = 0
         self.event_log = EventLog()
         self.epistemic_store = EpistemicStore()
-        inferred_criteria = (
-            infer_verification_from_goal(user_input)
-            if verification_criteria is None
-            else verification_criteria
-        )
+        from tal.verification import initial_workspace_digest
+        from tools.file_tools import WORKSPACE_DIR
+
+        # Model-inferred filenames are only a heuristic. The goal's artifact
+        # must be new or changed during this task, not an existing stale file.
+        if verification_criteria is None:
+            criteria = []
+            for item in infer_verification_from_goal(user_input):
+                try:
+                    baseline = initial_workspace_digest(WORKSPACE_DIR, item.path)
+                except (ValueError, OSError):
+                    baseline = None
+                criteria.append({
+                    "type": "fresh_file", "path": item.path,
+                    "min_size": item.min_size_bytes,
+                    "initial_digest": baseline,
+                })
+        else:
+            criteria = copy.deepcopy(verification_criteria)
+        effective_limits = copy.deepcopy(self.budget_limits)
+        effective_limits.max_steps = min(max_steps, effective_limits.max_steps)
+        self.budget_tracker.limits = copy.deepcopy(effective_limits)
         self.manifest = TaskManifest.compile(
             goal=user_input,
             available_tools=self.tools,
-            budget_limits=self.budget_limits,
-            verification_criteria=[
-                {"type": "file_exists", "path": c.path, "min_size": c.min_size_bytes}
-                for c in inferred_criteria
-            ],
+            budget_limits=effective_limits,
+            verification_criteria=criteria,
         )
         
     def _repair_json(self, raw: str) -> str:
@@ -720,22 +735,37 @@ class BasicAgent:
                 on_thought(thought)
             
             if final_answer:
+                if self.tal_mode and self.manifest and not self.manifest.verify_integrity():
+                    self.event_log.append("task_escalated", {"reason": "Manifest integrity changed before verification"})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.ESCALATED.value})
+                    return "Error: Manifest integrity check failed before completion"
                 terminal = self._pending_terminal_proposal if self.tal_mode else None
                 if isinstance(terminal, QueryProposal):
                     self.event_log.append("task_waiting_for_user", {"question": terminal.question})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.WAITING_FOR_USER.value})
                     if on_answer:
                         on_answer(final_answer)
                     return final_answer
                 if isinstance(terminal, EscalateProposal):
                     self.event_log.append("task_escalated", {"reason": terminal.reason})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.ESCALATED.value})
                     if on_error:
                         on_error(final_answer)
                     return final_answer
-                # Independent verification check in TAL mode if criteria exist
+                # A remaining failed tool call is never independent evidence.
+                if self.tal_mode and last_failed_action is not None:
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.FAILED.value,
+                                                           "reason": "Unresolved tool failure"})
+                    if on_answer:
+                        on_answer(final_answer)
+                    return final_answer
+                verification_passed = False
                 if self.tal_mode and self.manifest and self.manifest.verification_criteria:
                     from tools.file_tools import WORKSPACE_DIR
                     passed, v_messages = run_verification(self.manifest.verification_criteria, workspace_dir=WORKSPACE_DIR)
                     self.event_log.append("verification_run", {"passed": passed, "messages": v_messages})
+                    if passed:
+                        verification_passed = True
                     if not passed:
                         # Feed verification failure back into memory and retry
                         failed_obs = f"Verification failed: {'; '.join(v_messages)}"
@@ -750,7 +780,9 @@ class BasicAgent:
                         final_answer = reflected
                 
                 if self.tal_mode:
-                    self.event_log.append("task_completed", {"answer": final_answer})
+                    status = OutcomeStatus.VERIFIED if verification_passed else OutcomeStatus.COMPLETED_UNVERIFIED
+                    self.event_log.append("task_completed", {"answer": final_answer, "outcome": status.value})
+                    self.event_log.append("task_outcome", {"status": status.value})
 
                 if on_answer: on_answer(final_answer)
                 self._prune_memory()
@@ -856,6 +888,10 @@ class BasicAgent:
         )
         
         trace["response"] = result
+        if self.tal_mode:
+            outcomes = [event.data.get("status") for event in self.event_log.events
+                        if event.event_type == "task_outcome"]
+            trace["outcome"] = outcomes[-1] if outcomes else OutcomeStatus.ESCALATED.value
         return trace
 
     def run_turn_streaming(
