@@ -15,7 +15,7 @@ require(approvedModelSha256.isEmpty() || approvedModelSha256.matches(Regex("[0-9
 
 android {
     namespace = "com.tervoro.capybara"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.tervoro.capybara"

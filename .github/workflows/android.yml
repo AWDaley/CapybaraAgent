@@ -23,8 +23,8 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: '' # obsolete Android SDK 'tools' package is no longer published
-      - name: Install Android 36 SDK
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+      - name: Install Android 37 SDK
+        run: sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
       - name: Compile app and run TAL/demo tests
         working-directory: mobile
         run: bash ./gradlew --no-daemon :tal-core:test :app:assembleDemoDebug :app:testDemoDebugUnitTest

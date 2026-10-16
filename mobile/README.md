@@ -12,7 +12,7 @@ This first vertical slice is intentionally narrow and executable:
 
 ## Open in Android Studio
 
-1. Install current Android Studio with Android SDK 36 and JDK 17 or newer. The `litert` flavor may require JDK 21 because of the native runtime's published Kotlin bytecode; the `demo` flavor and TAL core use JDK 17.
+1. Install current Android Studio with Android SDK 37 and JDK 17 or newer. The `litert` flavor may require JDK 21 because of the native runtime's published Kotlin bytecode; the `demo` flavor and TAL core use JDK 17.
 2. Open the `mobile` directory as the project.
 3. Select the `demoDebug` build variant for the self-contained policy/UI demo.
 4. Run `./gradlew :tal-core:test :app:assembleDemoDebug` from the `mobile` directory.
