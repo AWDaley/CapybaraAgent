@@ -54,3 +54,29 @@ plus manual tests for biometric acceptance, denial, cancelled prompt, timeout,
 process death during staged/model rollback, low disk space, encrypted session
 restore, and LiteRT GPU/CPU fallback. Verify no INTERNET permission.
 Do not treat compilation as physical-device validation.
+
+## Offline signing utility
+
+The included `scripts/sign_mobile_model_package.py` prepares canonical
+unsigned JSON, computes the SHA-256 of the **actual** .litertlm file, and uses
+an OpenSSL P-256 private key to create a SHA256withECDSA signature. The key
+must stay on an offline/trusted developer machine or backed HSM; GitHub Actions
+and the Android APK must never have production signing private keys.
+
+Example for development with a non-production P-256 key (generate and protect
+your own signing key outside the repository):
+
+```bash
+python scripts/sign_mobile_model_package.py \
+  --model /trusted/path/model.litertlm \
+  --metadata /trusted/path/model-unsigned.json \
+  --key /secure/offline-p256-private-key.pem \
+  --output /trusted/path/model-signed.json
+```
+
+The utility prints Base64 descriptor and public-key properties for a trusted
+release build. The publisher private key stays outside Android and GitHub.
+An arbitrary self-signed descriptor MUST NOT be promoted as a trusted release:
+the pinned public key needs an independent, trusted review and deployment
+approval. This utility does not validate the model license, behavioral quality,
+or certifications listed in the descriptor.
