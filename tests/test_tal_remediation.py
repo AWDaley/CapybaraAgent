@@ -67,7 +67,7 @@ def test_deliverable_auto_materializer(temp_workspace):
         assert "# Incident Response Report" in content
 
 
-def test_action_gate_schema_auto_heal(temp_workspace):
+def test_action_gate_rejects_missing_read_file_target(temp_workspace):
     # Write a test file to the workspace
     test_file = os.path.join(temp_workspace, "active_report.txt")
     with open(test_file, "w", encoding="utf-8") as f:
@@ -80,9 +80,8 @@ def test_action_gate_schema_auto_heal(temp_workspace):
     proposal = ActionProposal(thought="Checking results", tool_name="read_file", tool_args={})
     res = gate.evaluate(proposal, envelope)
     
-    assert res.allowed is True
-    assert res.sanitized_args is not None
-    assert res.sanitized_args.get("path") == "active_report.txt"
+    assert res.allowed is False
+    assert res.stage_failed == "Stage 1: Schema Conformance"
 
 
 def test_orchestrator_pre_synthesis_remediation(temp_workspace):

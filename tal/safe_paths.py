@@ -17,7 +17,7 @@ def validate_relative_workspace_path(requested_path: str) -> str:
     if drive or normalized.startswith("/") or os.path.isabs(requested_path):
         raise ValueError("Absolute or drive-qualified paths are not permitted")
     if any(part == ".." for part in normalized.split("/")):
-        raise ValueError("Parent traversal is not permitted")
+        raise ValueError("Path escapes the workspace: parent traversal is outside workspace")
     return requested_path
 
 

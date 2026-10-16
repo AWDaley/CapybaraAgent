@@ -119,7 +119,8 @@ def test_tal_rejects_an_unauthorized_tool_before_execution():
         guardrails_enabled=False,
     )
 
-    result = agent.run_turn("Set value using python_repl.", max_steps=2, stop_after_tool=True)
+    result = agent.run_turn("Set value using python_repl.", max_steps=2, stop_after_tool=True,
+                            approval_callback=lambda *_: True)
 
     assert result == "ok"
     assert executed == ['{"code": "value = 1"}']

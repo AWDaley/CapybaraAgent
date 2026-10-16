@@ -89,7 +89,8 @@ def test_cross_platform_absolute_and_traversal_rejected(temp_workspace, unsafe_p
 
 
 def test_relative_nested_workspace_path_allowed(temp_workspace):
-    assert resolve_workspace_path(temp_workspace, "reports/2026/out.json").startswith(temp_workspace)
+    import os
+    assert os.path.commonpath([os.path.realpath(temp_workspace), resolve_workspace_path(temp_workspace, "reports/2026/out.json")]) == os.path.realpath(temp_workspace)
 
 
 def test_workspace_symlink_escape_is_rejected(temp_workspace, tmp_path):
