@@ -321,7 +321,7 @@ def test_model_completion_without_criteria_is_unverified():
         def __init__(self):
             super().__init__("scripted")
         def generate(self, messages, json_mode=False, timeout_seconds=None, response_schema=None):
-            return '{"type":"complete","thought":"","final_answer":"done"}'
+            return '{"thought":"","action":null,"final_answer":"done"}'
         def generate_with_retry(self, *args, **kwargs):
             return self.generate([])
         @staticmethod
