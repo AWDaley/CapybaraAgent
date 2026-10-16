@@ -8,7 +8,6 @@ Python REPL is not implemented: it is deliberately absent from safe mode.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -96,7 +95,7 @@ class IsolatedToolExecutor:
                 cidfile = os.path.join(stage, "container.id")
                 docker_args = [
                     self.policy.runtime, "run", "--rm", "--cidfile", cidfile,
-                    "--network", "none", "--read-only",
+                    "--network", "none", "--read-only", "--user", "65534:65534",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                     "--pids-limit", str(self.policy.max_pids),
                     "--memory", f"{self.policy.max_memory_mb}m",
