@@ -214,6 +214,7 @@ class BasicAgent:
                     "type": "fresh_file", "path": item.path,
                     "min_size": item.min_size_bytes,
                     "initial_digest": baseline,
+                    "source": "inferred_artifact_hint",
                 })
         else:
             criteria = copy.deepcopy(verification_criteria)
@@ -765,7 +766,12 @@ class BasicAgent:
                     passed, v_messages = run_verification(self.manifest.verification_criteria, workspace_dir=WORKSPACE_DIR)
                     self.event_log.append("verification_run", {"passed": passed, "messages": v_messages})
                     if passed:
-                        verification_passed = True
+                        # Filename heuristics establish fresh artifact evidence,
+                        # not whether the artifact fulfills the user's goal.
+                        verification_passed = all(
+                            criterion.get("source") != "inferred_artifact_hint"
+                            for criterion in self.manifest.verification_criteria
+                        )
                     if not passed:
                         # Feed verification failure back into memory and retry
                         failed_obs = f"Verification failed: {'; '.join(v_messages)}"

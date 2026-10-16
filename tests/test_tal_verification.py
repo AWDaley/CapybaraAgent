@@ -331,3 +331,13 @@ def test_model_completion_without_criteria_is_unverified():
     agent = BasicAgent(llm_client=ScriptedLLM(), tal_mode=True)
     result = agent.run_turn_with_trace("Answer a conversational question", max_steps=2)
     assert result["outcome"] == OutcomeStatus.COMPLETED_UNVERIFIED.value
+
+
+def test_inferred_artifact_gate_is_not_a_full_success_oracle():
+    from agent import BasicAgent
+    from tal.outcomes import OutcomeStatus
+
+    agent = BasicAgent(tal_mode=True, tool_registry={"write_file": lambda args: "ok"})
+    agent.start_task("Write summary to report.txt", max_steps=2)
+    assert agent.manifest.verification_criteria[0]["source"] == "inferred_artifact_hint"
+    assert OutcomeStatus.VERIFIED.value != OutcomeStatus.COMPLETED_UNVERIFIED.value

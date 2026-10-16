@@ -305,7 +305,7 @@ class TALTestRunner:
             outcome_success = outcome_success and verification_passed is True
         if not outcome_success:
             outcome = "failed"
-        elif verification_passed is True:
+        elif verification_passed is True and outcome != "completed_unverified":
             outcome = "verified"
 
         return RunMetrics(
