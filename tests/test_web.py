@@ -173,3 +173,13 @@ def test_terminal_outcome_does_not_promote_unverified_steps():
         basic_agent = agent
 
     assert _terminal_outcome(FakePlan()) == "completed_unverified"
+
+
+def test_plan_terminal_failure_is_visible_from_shared_execution_log():
+    from agent import BasicAgent
+    from planning_agent import PlanningAgent
+    from web import _terminal_outcome
+    basic = BasicAgent(tal_mode=True)
+    planner = PlanningAgent(basic, basic.llm_client, tal_mode=True)
+    basic.event_log.append("task_outcome", {"status": "failed"})
+    assert _terminal_outcome(planner) == "failed"

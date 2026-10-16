@@ -54,3 +54,47 @@ def test_tal_planning_agent_emits_typed_task_graph():
 
     assert isinstance(planned, TaskGraph)
     assert [node.node_id for node in planned.topological_order()] == ["inspect", "implement"]
+
+
+def test_tal_planning_uses_graph_for_all_interfaces(monkeypatch):
+    graph = TaskGraph.from_dict({
+        "graph_id": "common", "title": "Common",
+        "nodes": [{"node_id": "one", "objective": "Bounded step"}],
+    })
+    client = LocalMockLLM()
+    planner = PlanningAgent(
+        BasicAgent(llm_client=client, verbose=False, tal_mode=True),
+        client, tal_mode=True,
+    )
+    routes = []
+    def graph_plan(goal):
+        routes.append("graph")
+        return graph
+
+    def run_graph(item, approval_callback=None, on_thought=None, on_specialist_event=None):
+        routes.append("execute_graph")
+        planner.last_outcome = "completed_unverified"
+        return "same answer"
+
+    monkeypatch.setattr(planner, "plan_task_graph", graph_plan)
+    monkeypatch.setattr(planner, "execute_task_graph", run_graph)
+    monkeypatch.setattr(
+        planner, "plan",
+        lambda *_: (_ for _ in ()).throw(AssertionError("Legacy planner was used")),
+    )
+    assert planner.run("same goal") == "same answer"
+    assert planner.run_with_trace("same goal")["response"] == "same answer"
+    events = []
+    planner.run_streaming("same goal", lambda kind, data: events.append((kind, data)))
+    assert routes.count("graph") == routes.count("execute_graph") == 3
+    assert sum(kind == "answer" for kind, _ in events) == 1
+
+
+def test_planning_trace_reports_invalid_graph_as_failed():
+    client = LocalMockLLM("invalid non-json plan")
+    planner = PlanningAgent(
+        BasicAgent(llm_client=client, verbose=False, tal_mode=True), client, tal_mode=True,
+    )
+    trace = planner.run_with_trace("Do something")
+    assert trace["outcome"] == "failed"
+    assert "valid task graph" in trace["response"]
