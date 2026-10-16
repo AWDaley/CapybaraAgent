@@ -32,6 +32,8 @@ class RunMetrics:
     verification_messages: list[str] = field(default_factory=list)
     outcome: str = "completed_unverified"
     events_count: int = 0
+    observed_state: dict[str, Any] = field(default_factory=dict)
+    observed_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

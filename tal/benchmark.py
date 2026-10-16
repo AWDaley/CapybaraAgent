@@ -42,12 +42,16 @@ class AcceptanceOracle:
 
     final_contains_all: tuple[str, ...] = ()
     tool_observations: tuple[tuple[str, str], ...] = ()
+    state_equals: dict[str, Any] = field(default_factory=dict)
+    artifact_verifier: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "AcceptanceOracle":
         if not isinstance(raw, dict):
             raise ValueError("Benchmark oracle must be a JSON object")
-        unexpected = set(raw) - {"final_contains_all", "tool_observations"}
+        unexpected = set(raw) - {
+            "final_contains_all", "tool_observations", "state_equals", "artifact_verifier",
+        }
         if unexpected:
             raise ValueError(f"Benchmark oracle has unsupported fields: {sorted(unexpected)}")
         final = raw.get("final_contains_all", [])
@@ -61,11 +65,30 @@ class AcceptanceOracle:
             for item in observations
         ):
             raise ValueError("oracle.tool_observations must contain exact tool/contains objects")
-        if not final and not observations:
+        state = raw.get("state_equals", {})
+        if not isinstance(state, dict) or len(state) > 16 or not all(
+            isinstance(key, str) and key.isidentifier() for key in state
+        ):
+            raise ValueError("oracle.state_equals must map variable identifiers to expected JSON values")
+        # JSON roundtrip enforces size, simple serializable observations, and
+        # forbids NaN/Infinity and arbitrary executable expressions.
+        try:
+            state_json = _canonical_json(state)
+            if len(state_json) > 65536:
+                raise ValueError("oracle.state_equals exceeds bounded JSON size")
+            state = json.loads(state_json)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("oracle.state_equals must be JSON-compatible") from exc
+        verifier = raw.get("artifact_verifier")
+        if verifier not in (None, "distributed_saga_v1"):
+            raise ValueError("Unknown independent artifact verifier")
+        if not final and not observations and not state and verifier is None:
             raise ValueError("Benchmark oracle must specify at least one independent check")
         return cls(
             final_contains_all=tuple(final),
             tool_observations=tuple((item["tool"], item["contains"]) for item in observations),
+            state_equals=state,
+            artifact_verifier=verifier,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,6 +98,8 @@ class AcceptanceOracle:
                 {"tool": tool, "contains": expected}
                 for tool, expected in self.tool_observations
             ],
+            **({"state_equals": self.state_equals} if self.state_equals else {}),
+            **({"artifact_verifier": self.artifact_verifier} if self.artifact_verifier else {}),
         }
 
     def evaluate(self, run: RunMetrics) -> bool:
@@ -97,6 +122,13 @@ class AcceptanceOracle:
                     matched = True
                     break
             if not matched:
+                return False
+        for key, expected in self.state_equals.items():
+            if key not in run.observed_state or run.observed_state[key] != expected:
+                return False
+        if self.artifact_verifier is not None:
+            from tal.benchmark_evidence import verify_distributed_saga
+            if not verify_distributed_saga(run.observed_artifacts):
                 return False
         return True
 
@@ -341,7 +373,15 @@ class SLMBenchmarkRunner:
         )
         for case, repetition in trials:
             trial_seed = rng.randrange(2**32) if seed is not None else None
-            result = self.test_runner.run_single_test(case.prompt, seed=trial_seed)
+            result = self.test_runner.run_single_test(
+                case.prompt, seed=trial_seed,
+                evidence_keys=tuple(case.oracle.state_equals) if case.oracle else (),
+                artifact_paths=(
+                    ("saga_execution_audit.json", "saga_release_manifest.json", "saga_execution_report.md")
+                    if case.oracle and case.oracle.artifact_verifier == "distributed_saga_v1"
+                    else ()
+                ),
+            )
             scorecard.trials.append(BenchmarkTrial(
                 case_id=case.case_id,
                 category=case.category,
