@@ -136,11 +136,10 @@ def test_saga_oracle_validates_actual_artifact_hash_chain(tmp_path):
     oracle = AcceptanceOracle.from_dict({"artifact_verifier": "distributed_saga_v1"})
     assert oracle.evaluate(RunMetrics(success=True, observed_artifacts=observed))
     assert not oracle.evaluate(RunMetrics(success=True, final_answer="Verified saga!"))
-    audit["ledger_events"][2]["event_type"] = "PAYMENT_CAPTURED"  # tamper without new hash
+    audit["ledger_events"][12]["event_type"] = "PAYMENT_CAPTURED"  # overwrite failed payment
     (tmp_path / paths[0]).write_text(json.dumps(audit), encoding="utf-8")
     _, tampered = collect_benchmark_evidence(str(tmp_path), (), paths)
     assert not oracle.evaluate(RunMetrics(success=True, observed_artifacts=tampered))
-    audit["ledger_events"][2]["event_type"] = "PAYMENT_CAPTURED"
     assert not verify_distributed_saga({**observed, paths[0]: {
         **observed[paths[0]], "content": observed[paths[0]]["content"] + "malicious",
     }})
