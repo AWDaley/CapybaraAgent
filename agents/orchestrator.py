@@ -323,6 +323,7 @@ class OrchestratorAgent:
             tal_mode=self.tal_mode,
             use_slm_profile=self.use_slm_profile,
             tool_registry=self.tool_registry,
+            repl_globals_provider=getattr(self, "repl_globals_provider", None),
         )
 
         def handle_specialist_event(spec, evt_type, data):
@@ -387,6 +388,7 @@ class OrchestratorAgent:
             tal_mode=self.tal_mode,
             use_slm_profile=self.use_slm_profile,
             tool_registry=self.tool_registry,
+            repl_globals_provider=getattr(self, "repl_globals_provider", None),
         )
 
         def handle_specialist_event(spec, evt_type, data):

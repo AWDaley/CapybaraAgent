@@ -16,7 +16,6 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from tools.basic_tools import _knowledge_store
 from tal.safe_paths import validate_relative_workspace_path
 
 
@@ -38,34 +37,28 @@ def _load_dotenv():
 
 _load_dotenv()
 
-# --- SSL context with auto-detection --------------------------------------
-_ssl_context_cache = None
+# SSL policy is controlled by trusted process configuration ONLY.
+# Model-writeable memory must never alter transport security for other users.
+_ssl_context_cache = {}
 
 def _get_ssl_context():
-    """Return a verified SSL context unless insecure mode was explicitly enabled."""
-    global _ssl_context_cache
-    if _ssl_context_cache is not None:
-        return _ssl_context_cache
-
-    # Explicit opt-in to insecure SSL
-    if os.environ.get("CAPYBARA_INSECURE_SSL") == "1" or _knowledge_store.get_fact("CAPYBARA_INSECURE_SSL") == "1":
+    """Use a verified context by default; cache each explicit policy separately."""
+    insecure = os.environ.get("CAPYBARA_INSECURE_SSL") == "1"
+    cached = _ssl_context_cache.get(insecure)
+    if cached is not None:
+        return cached
+    if insecure:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        _ssl_context_cache = ctx
-        return ctx
-
-    # Try certifi first
-    try:
-        import certifi
-        ctx = ssl.create_default_context(cafile=certifi.where())
-        _ssl_context_cache = ctx
-        return ctx
-    except ImportError:
-        pass
-
-    _ssl_context_cache = ssl.create_default_context()
-    return _ssl_context_cache
+    else:
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            ctx = ssl.create_default_context()
+    _ssl_context_cache[insecure] = ctx
+    return ctx
 
 
 def _validate_remote_url(url: str) -> urllib.parse.ParseResult:

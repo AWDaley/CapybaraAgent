@@ -3,6 +3,7 @@ import glob
 import json
 import os
 import uuid
+from pathlib import Path
 
 from tal.event_store import EventLog
 
@@ -22,7 +23,9 @@ class SessionManager:
             self.sessions_dir = os.path.join(root_sessions_dir, "clients", safe_namespace)
         else:
             self.sessions_dir = root_sessions_dir
-        os.makedirs(self.sessions_dir, exist_ok=True)
+        os.makedirs(self.sessions_dir, mode=0o700, exist_ok=True)
+        if session_namespace is not None and os.name == "posix":
+            os.chmod(self.sessions_dir, 0o700)
         self.current_session_file = None
         self.current_event_file = None
 
@@ -68,17 +71,29 @@ class SessionManager:
         sessions.sort(key=lambda x: x["mtime"], reverse=True)
         return sessions
 
-    def load_session(self, filepath: str) -> list[dict]:
-        """Loads a session's memory and sets it as the current session."""
-        from pathlib import Path
-        
+    def owns_session(self, filepath: str) -> bool:
+        """Only a canonical direct child conversation JSON is loadable."""
+        if not isinstance(filepath, str) or not os.path.isabs(filepath):
+            return False
         try:
             resolved = Path(filepath).resolve()
-            sessions_dir = Path(self.sessions_dir).resolve()
-            
-            if os.path.commonpath([str(sessions_dir), str(resolved)]) != str(sessions_dir):
-                print(f"Error: Access denied - path '{filepath}' is outside sessions directory")
-                return []
+            root = Path(self.sessions_dir).resolve()
+            return (
+                resolved.parent == root
+                and resolved.name.startswith("session_")
+                and resolved.name.endswith(".json")
+                and resolved.is_file()
+            )
+        except (ValueError, OSError):
+            return False
+
+    def load_session(self, filepath: str) -> list[dict]:
+        """Loads a session's memory and sets it as the current session."""
+        if not self.owns_session(filepath):
+            print("Error: Session does not belong to the active browser")
+            return []
+        try:
+            resolved = Path(filepath).resolve()
                 
             self.current_session_file = str(resolved)
             stem = os.path.basename(str(resolved)).replace("session_", "events_").replace(".json", ".jsonl")

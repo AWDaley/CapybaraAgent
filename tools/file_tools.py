@@ -1,13 +1,46 @@
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from tal.safe_paths import resolve_workspace_path
 
-# Sandbox directory for file operations
-# Sandbox directory for file operations
-WORKSPACE_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "workspace"))
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+# The CLI uses its historical workspace. Each browser request binds a separate
+# private directory. The PathLike adapter preserves existing file-tool APIs.
+_DEFAULT_WORKSPACE_DIR = os.path.realpath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "workspace")
+)
+os.makedirs(_DEFAULT_WORKSPACE_DIR, exist_ok=True)
+_active_workspace: ContextVar[str | None] = ContextVar("capybara_workspace", default=None)
+
+
+class _WorkspaceRoot(os.PathLike):
+    def __fspath__(self) -> str:
+        return _active_workspace.get() or _DEFAULT_WORKSPACE_DIR
+
+    def __str__(self) -> str:
+        return self.__fspath__()
+
+
+WORKSPACE_DIR = _WorkspaceRoot()
+
+
+@contextmanager
+def workspace_scope(directory: str):
+    """Bind one server-issued private workspace for this request and its tools."""
+    root = os.path.realpath(directory)
+    os.makedirs(root, exist_ok=True)
+    token = _active_workspace.set(root)
+    try:
+        yield root
+    finally:
+        _active_workspace.reset(token)
+
+
+def current_workspace() -> str:
+    """Resolve the workspace for the caller's active context."""
+    return os.path.realpath(WORKSPACE_DIR)
 
 def _get_safe_path(filename: str) -> str:
     """Ensures the file path stays within the sandbox directory."""
