@@ -3,7 +3,7 @@ package com.tervoro.capybara.slm
 import com.tervoro.tal.Proposal
 import com.tervoro.tal.ProposalParser
 import kotlinx.coroutines.runBlocking
-import kotlin.test.Test
+import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals

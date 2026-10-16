@@ -86,6 +86,7 @@ dependencies {
     "litertImplementation"("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
 
     testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
