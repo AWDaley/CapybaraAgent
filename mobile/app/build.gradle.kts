@@ -12,6 +12,17 @@ val approvedModelSha256 = providers.gradleProperty("tervoroApprovedModelSha256")
 require(approvedModelSha256.isEmpty() || approvedModelSha256.matches(Regex("[0-9a-f]{64}"))) {
     "tervoroApprovedModelSha256 must be an exact 64-character SHA-256 digest"
 }
+val signedModelDescriptorBase64 = providers.gradleProperty("tervoroSignedModelDescriptorBase64")
+    .orElse("").get()
+val trustedPublisherSpkiBase64 = providers.gradleProperty("tervoroTrustedPublisherSpkiBase64")
+    .orElse("").get()
+require((signedModelDescriptorBase64.isEmpty() && trustedPublisherSpkiBase64.isEmpty()) ||
+    (signedModelDescriptorBase64.isNotEmpty() && trustedPublisherSpkiBase64.isNotEmpty())) {
+    "The signed model descriptor and trusted publisher public key must be configured together"
+}
+require(listOf(signedModelDescriptorBase64, trustedPublisherSpkiBase64).all {
+    it.matches(Regex("[A-Za-z0-9+/=]*"))
+}) { "Signed model descriptor and publisher public key must be base64-encoded" }
 
 android {
     namespace = "com.tervoro.capybara"
@@ -24,6 +35,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         buildConfigField("String", "APPROVED_MODEL_SHA256", "\"$approvedModelSha256\"")
+        buildConfigField("String", "APPROVED_MODEL_DESCRIPTOR_BASE64", "\"$signedModelDescriptorBase64\"")
+        buildConfigField("String", "TRUSTED_PUBLISHER_SPKI_BASE64", "\"$trustedPublisherSpkiBase64\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

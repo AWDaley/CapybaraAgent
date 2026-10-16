@@ -1,11 +1,18 @@
 package com.tervoro.capybara
 
 import android.content.Context
+import android.os.Build
+import com.tervoro.tal.ModelPackageTrustPolicy
+import com.tervoro.tal.P256ModelPackageVerifier
+import com.tervoro.tal.SignedModelPackage
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.security.KeyFactory
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 import java.util.UUID
 
 data class InstalledModel(
@@ -26,22 +33,51 @@ class ModelManager(
     private val rollbackFile = File(modelDirectory, "rollback.litertlm")
 
     fun installedPath(): String? {
-        // A rollback file means a previous install was interrupted between
-        // promotion and commit. Recover the old package before activation.
+        // Recover an interrupted promotion before checking the installed bytes.
         if (rollbackFile.isFile) rollbackPromotion()
         if (!modelFile.isFile) return null
-        if (BuildConfig.DEBUG && BuildConfig.APPROVED_MODEL_SHA256.isEmpty()) {
-            return modelFile.absolutePath
-        }
-        val expected = BuildConfig.APPROVED_MODEL_SHA256
-        if (expected.isBlank()) return null // release without a pin fails closed
-        val actual = sha256File(modelFile)
-        return modelFile.takeIf { actual == expected }?.absolutePath
+        return runCatching {
+            verifyModelPackage(sha256File(modelFile))
+            modelFile.absolutePath
+        }.getOrNull()
     }
 
-    private fun isApproved(digest: String): Boolean =
-        (BuildConfig.DEBUG && BuildConfig.APPROVED_MODEL_SHA256.isEmpty()) ||
-            digest.equals(BuildConfig.APPROVED_MODEL_SHA256, ignoreCase = true)
+    private fun verifyModelPackage(digest: String) {
+        val descriptorB64 = BuildConfig.APPROVED_MODEL_DESCRIPTOR_BASE64
+        val signerB64 = BuildConfig.TRUSTED_PUBLISHER_SPKI_BASE64
+        val legacyDigest = BuildConfig.APPROVED_MODEL_SHA256
+
+        // Explicitly marked developer-only unsigned model loading. Supplying
+        // ANY release trust input switches off the debug bypass as well.
+        if (BuildConfig.DEBUG && descriptorB64.isBlank() &&
+            signerB64.isBlank() && legacyDigest.isBlank()) return
+
+        require(descriptorB64.isNotBlank() && signerB64.isNotBlank()) {
+            "A signed model descriptor and pinned publisher key are required"
+        }
+        if (legacyDigest.isNotBlank()) {
+            require(digest.equals(legacyDigest, ignoreCase = true)) {
+                "Imported model SHA-256 differs from the optional pinned digest"
+            }
+        }
+        val descriptor = SignedModelPackage.parse(
+            String(Base64.getDecoder().decode(descriptorB64), Charsets.UTF_8),
+        )
+        // Publisher identity is bound to the trusted, application-pinned key.
+        require(descriptor.publisherId == "tervoro") { "Unknown signed model publisher" }
+        require(descriptor.promptProfileId == "tal-mobile-v1") {
+            "Model prompt profile does not match the installed TAL prompt contract"
+        }
+        val key = KeyFactory.getInstance("EC").generatePublic(
+            X509EncodedKeySpec(Base64.getDecoder().decode(signerB64)),
+        )
+        ModelPackageTrustPolicy(
+            verifier = P256ModelPackageVerifier(mapOf("tervoro" to key)),
+            expectedRuntimeId = "litert",
+            androidApi = Build.VERSION.SDK_INT,
+            abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+        ).verify(descriptor, "sha256:$digest")
+    }
 
     private fun sha256File(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -83,9 +119,7 @@ class ModelManager(
             }
             require(total > 1_024) { "Selected model package is empty or truncated" }
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            require(isApproved(hash)) {
-                "Model SHA-256 is not on the approved package list"
-            }
+            verifyModelPackage(hash)
             completed = true
             return StagedModel(InstalledModel(temporary.absolutePath, hash, total))
         } finally {

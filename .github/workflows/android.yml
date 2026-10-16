@@ -27,4 +27,4 @@ jobs:
         run: sdkmanager --install "platforms;android-37.1" "build-tools;36.0.0"
       - name: Compile app and run TAL/demo tests
         working-directory: mobile
-        run: bash ./gradlew --no-daemon :tal-core:test :app:assembleDemoDebug :app:testDemoDebugUnitTest
+        run: bash ./gradlew --no-daemon :tal-core:test :app:assembleDemoDebug :app:testDemoDebugUnitTest :app:assembleDemoDebugAndroidTest

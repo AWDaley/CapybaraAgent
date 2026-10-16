@@ -87,7 +87,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             modelStatus = if (BuildConfig.DEBUG) {
                                 "Import a .litertlm model to begin"
                             } else {
-                                "Import an approved .litertlm model (pinned SHA-256 required)"
+                                "Import a publisher-signed .litertlm model (signature required)"
                             },
                             modelReady = false,
                         )
