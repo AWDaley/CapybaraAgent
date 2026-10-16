@@ -1,10 +1,10 @@
 import contextlib
 import logging
 import random
-import os
 import shutil
 import tempfile
 import time
+import threading
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -22,6 +22,9 @@ from tal_test_report import (
 )
 
 logger = logging.getLogger("capybara.tal_test")
+# Protect the legacy benchmark REPL globals against concurrent benchmark
+# trials. Unlike browser sessions, this in-process REPL has no own namespace.
+_BENCHMARK_REPL_LOCK = threading.RLock()
 
 
 class TrackingLLMClient(LLMClient):
@@ -85,19 +88,19 @@ class TrackingLLMClient(LLMClient):
 
 @contextlib.contextmanager
 def sandbox_workspace():
-    """Provides a temporary, isolated workspace directory to prevent run interference."""
-    temp_dir = tempfile.mkdtemp(prefix="capy_tal_test_")
-    import tools.file_tools
-    old_workspace = getattr(tools.file_tools, "WORKSPACE_DIR", None)
-    tools.file_tools.WORKSPACE_DIR = os.path.realpath(temp_dir)
+    """Use a ContextVar-bound temporary workspace; never rewrite globals."""
+    from tools.file_tools import workspace_scope
     from tools.external_tools import reset_repl_globals
-    reset_repl_globals()
+
+    temp_dir = tempfile.mkdtemp(prefix="capy_tal_test_")
     try:
-        yield temp_dir
+        with _BENCHMARK_REPL_LOCK, workspace_scope(temp_dir):
+            reset_repl_globals()
+            try:
+                yield temp_dir
+            finally:
+                reset_repl_globals()
     finally:
-        reset_repl_globals()
-        if old_workspace is not None:
-            tools.file_tools.WORKSPACE_DIR = old_workspace
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
@@ -139,7 +142,11 @@ class TALTestRunner:
             return "multi-agent"
         return "react"
 
-    def _run_single_agent(self, prompt: str, tal_mode: bool) -> RunMetrics:
+    def _run_single_agent(
+        self, prompt: str, tal_mode: bool,
+        evidence_keys: tuple[str, ...] = (),
+        artifact_paths: tuple[str, ...] = (),
+    ) -> RunMetrics:
         """Runs the configured agent architecture in a sandboxed workspace and gathers metrics."""
         tracking_llm = TrackingLLMClient(self.llm_client)
         start_time = time.time()
@@ -147,6 +154,8 @@ class TALTestRunner:
         # Telemetry accumulators
         thoughts: list[str] = []
         tools_called: list[dict[str, Any]] = []
+        observed_state: dict[str, Any] = {}
+        observed_artifacts: dict[str, dict[str, Any]] = {}
         final_answer: str = ""
         error_msg: str | None = None
         success: bool = True
@@ -185,7 +194,7 @@ class TALTestRunner:
         def auto_approve_callback(tool_name: str, args: str) -> bool:
             return False
 
-        with sandbox_workspace():
+        with sandbox_workspace() as trial_workspace:
             agent_instance = None
             try:
                 if self.mode == "react":
@@ -245,6 +254,14 @@ class TALTestRunner:
             except Exception as e:
                 error_msg = f"Exception during execution: {e}"
                 success = False
+
+            # Observe state/artifact bytes before the temporary workspace
+            # is deleted. The model cannot populate this from final text.
+            if evidence_keys or artifact_paths:
+                from tal.benchmark_evidence import collect_benchmark_evidence
+                observed_state, observed_artifacts = collect_benchmark_evidence(
+                    trial_workspace, evidence_keys, artifact_paths,
+                )
 
         duration = time.time() - start_time
 
@@ -333,9 +350,15 @@ class TALTestRunner:
             outcome=outcome,
             verification_messages=verification_messages,
             events_count=events_count,
+            observed_state=observed_state,
+            observed_artifacts=observed_artifacts,
         )
 
-    def run_single_test(self, prompt: str, seed: int | None = None) -> TALTestResult:
+    def run_single_test(
+        self, prompt: str, seed: int | None = None,
+        evidence_keys: tuple[str, ...] = (),
+        artifact_paths: tuple[str, ...] = (),
+    ) -> TALTestResult:
         """Runs the prompt with baseline (No TAL) and with TAL, returning the paired comparison."""
         modes = [False, True]
         if seed is not None:
@@ -344,7 +367,10 @@ class TALTestRunner:
         for tal_mode in modes:
             if self.verbose:
                 print(f"\n[TAL Test Mode] Running {'TAL' if tal_mode else 'Baseline'} mode...")
-            metrics[tal_mode] = self._run_single_agent(prompt, tal_mode=tal_mode)
+            metrics[tal_mode] = self._run_single_agent(
+                prompt, tal_mode=tal_mode,
+                evidence_keys=evidence_keys, artifact_paths=artifact_paths,
+            )
         baseline_metrics = metrics[False]
         tal_metrics = metrics[True]
 
