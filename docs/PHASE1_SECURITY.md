@@ -27,7 +27,8 @@ A mutable tag is rejected. The runtime executable must exist in PATH.
 The stateless runner uses an ephemeral container with a nonroot UID, dropped
 capabilities, no network namespace access, a read-only root filesystem,
 a limited process count, memory and CPU limits, and an explicit workspace bind
-mount. Python scripts are copied to a read-only snapshot before execution.
+mount. Python scripts are copied to an immutable in-memory snapshot **before approval**,
+and that exact snapshot hash is displayed for review and executed afterward.
 On timeout the container is force-removed by its ID. The runner does not provide
 a stateful REPL, and it does not attempt host execution as a fallback.
 

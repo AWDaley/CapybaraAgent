@@ -431,12 +431,30 @@ class BasicAgent:
                 tier = get_safety_tier(tool_name, tal_mode=False)
                 requires_confirmation = (tier == "dangerous")
 
+            prepared_command = None
+            secure_runner = None
+            tool_function = self.tools[tool_name]
+            approval_display = args
+            if self.tal_mode and tool_name == "run_command":
+                from execution.isolated import IsolatedToolExecutor
+                candidate = getattr(tool_function, "__self__", None)
+                if isinstance(candidate, IsolatedToolExecutor):
+                    try:
+                        prepared_command = candidate.prepare_command(args)
+                        secure_runner = candidate
+                        if prepared_command.script_sha256:
+                            approval_display += (
+                                "\\nApproved script SHA-256: " + prepared_command.script_sha256
+                            )
+                    except (OSError, ValueError, TypeError) as exc:
+                        return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
+
             approval_granted = not requires_confirmation
             # TAL approval is mandatory regardless of the legacy guardrails
             # preference. A missing or failing approval handler never grants an effect.
             if requires_confirmation and (self.tal_mode or self.guardrails_enabled):
                 try:
-                    approval_granted = request_confirmation(tool_name, args, approval_callback=approval_callback)
+                    approval_granted = request_confirmation(tool_name, approval_display, approval_callback=approval_callback)
                 except (EOFError, OSError, ValueError, RuntimeError):
                     approval_granted = False
                 if not approval_granted:
@@ -458,7 +476,6 @@ class BasicAgent:
                     return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
 
             try:
-                tool_function = self.tools[tool_name]
                 if self._execution_deadline and self._execution_deadline.expired:
                     raise DeadlineExceeded("Pipeline deadline exhausted before tool execution.")
                 tool_started_at = time.monotonic()
@@ -475,6 +492,8 @@ class BasicAgent:
                         if self.manifest and not self.manifest.verify_integrity():
                             raise AuthorizationDenied("Manifest changed before execution")
                     execution_started_at = time.monotonic()
+                    if prepared_command is not None:
+                        return secure_runner.run_prepared(prepared_command), execution_started_at
                     return tool_function(args), execution_started_at
 
                 future = self._executor.submit(invoke_tool)

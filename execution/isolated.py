@@ -1,13 +1,12 @@
 """Fail-closed OS execution boundary for model-driven tools.
 
-Untrusted code must NEVER be interpreted inside the Capybara server process.
-A pinned container image, a Docker/Podman executable, and a local workspace are
-required for the supported stateless command runner. A persistent, isolated
-Python REPL is not implemented: it is deliberately absent from safe mode.
+Supported: isolated, stateless, digest-pinned Docker/Podman command execution.
+Unsupported in safe mode: in-process or persistent untrusted Python REPL.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -15,6 +14,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,12 +23,12 @@ from tal.safe_paths import resolve_workspace_path, validate_relative_workspace_p
 
 _PINNED_IMAGE = re.compile(r"^[a-zA-Z0-9_./:-]+@sha256:[0-9a-f]{64}$")
 _ALLOWED_COMMANDS = {"python", "python3", "ls", "cat"}
+_MAX_SCRIPT_BYTES = 1024 * 1024
+_MAX_OUTPUT_BYTES = 4096
 
 
 @dataclass(frozen=True)
 class ExecutionPolicy:
-    """Explicitly bounded sandbox resources and environment."""
-
     runtime: str = ""
     image: str = ""
     max_seconds: int = 15
@@ -50,98 +50,145 @@ class ExecutionPolicy:
         )
 
 
+@dataclass(frozen=True)
+class PreparedCommand:
+    """The exact executable bytes approved by the user, before any effects."""
+
+    command_args: tuple[str, ...]
+    workspace_dir: str
+    script_bytes: bytes | None = None
+    script_sha256: str | None = None
+
+
+def _drain_bounded(pipe, output: bytearray) -> None:
+    """Drain even hostile unlimited output without consuming unbounded RAM."""
+    try:
+        while True:
+            chunk = pipe.read(8192)
+            if not chunk:
+                break
+            remaining = _MAX_OUTPUT_BYTES - len(output)
+            if remaining > 0:
+                output.extend(chunk[:remaining])
+    finally:
+        pipe.close()
+
+
 class IsolatedToolExecutor:
-    """Disposable container runner; no host interpreter or shell fallback."""
+    """Disposable container runner; never fall back to the host interpreter."""
 
     def __init__(self, policy: ExecutionPolicy | None = None):
         self.policy = policy or ExecutionPolicy.from_environment()
 
+    def prepare_command(self, args: str) -> PreparedCommand:
+        """Validate and freeze the script bytes *before* asking for approval."""
+        data = json.loads(args)
+        if not isinstance(data, dict):
+            raise ValueError("Command arguments must be a JSON object")
+        command = data.get("command", "")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("A nonempty command is required")
+        if any(char in command for char in "&|;$`><\n\r"):
+            raise ValueError("Shell operators are not permitted")
+        tokens = shlex.split(command)
+        if not tokens or tokens[0] not in _ALLOWED_COMMANDS:
+            raise ValueError("Command is not in the isolated executor allowlist")
+        for token in tokens[1:]:
+            validate_relative_workspace_path(token)
+        import tools.file_tools
+
+        workspace = os.path.realpath(tools.file_tools.WORKSPACE_DIR)
+        if tokens[0] in {"python", "python3"}:
+            if len(tokens) < 2 or tokens[1].startswith("-"):
+                raise ValueError("Only explicit workspace Python script files may run")
+            script = Path(resolve_workspace_path(workspace, tokens[1]))
+            if not script.is_file() or script.stat().st_size > _MAX_SCRIPT_BYTES:
+                raise ValueError("Script is unavailable or exceeds the 1 MiB limit")
+            content = script.read_bytes()
+            if len(content) > _MAX_SCRIPT_BYTES:
+                raise ValueError("Script exceeds the 1 MiB limit")
+            return PreparedCommand(
+                command_args=("python", "-I", "-B", "/approved.py", *tokens[2:]),
+                workspace_dir=workspace, script_bytes=content,
+                script_sha256=hashlib.sha256(content).hexdigest(),
+            )
+        return PreparedCommand(command_args=tuple(tokens), workspace_dir=workspace)
+
     def run_command(self, args: str) -> str:
         if not self.policy.ready():
             return ("Error [policy_denied]: Container isolation unavailable. "
-                    "Configure a Docker/Podman runtime and a digest-pinned sandbox image.")
+                    "Configure Docker/Podman and a digest-pinned image.")
         try:
-            data = json.loads(args)
-            command = data.get("command", "")
-            if not isinstance(command, str) or not command.strip():
-                return "Error [invalid_arguments]: Missing command"
-            if any(char in command for char in "&|;$`><\n\r"):
-                return "Error [policy_denied]: Shell metacharacters are not permitted"
-            tokens = shlex.split(command)
-            if not tokens or tokens[0] not in _ALLOWED_COMMANDS:
-                return "Error [policy_denied]: Command not permitted in the isolated executor"
-            if tokens[0] in {"python", "python3"} and (
-                len(tokens) < 2 or tokens[1].startswith("-")
-            ):
-                return "Error [policy_denied]: Only explicit workspace Python scripts may run"
-            for token in tokens[1:]:
-                validate_relative_workspace_path(token)
-            import tools.file_tools
+            return self.run_prepared(self.prepare_command(args))
+        except (ValueError, OSError, TypeError, json.JSONDecodeError) as exc:
+            return f"Error [invalid_arguments]: {exc}"
 
-            workspace = os.path.realpath(tools.file_tools.WORKSPACE_DIR)
-            os.makedirs(workspace, exist_ok=True)
+    def run_prepared(self, prepared: PreparedCommand) -> str:
+        """Execute only the snapshotted bytes; workspace edits cannot change them."""
+        if not self.policy.ready():
+            return "Error [policy_denied]: Container isolation unavailable"
+        try:
             with tempfile.TemporaryDirectory(prefix="capybara-sandbox-") as stage:
-                command_args = list(tokens)
-                mounts = ["--mount", f"type=bind,src={workspace},dst=/workspace"]
-                if tokens[0] in {"python", "python3"}:
-                    script = resolve_workspace_path(workspace, tokens[1])
-                    if not os.path.isfile(script):
-                        return "Error [invalid_arguments]: Workspace script does not exist"
-                    # Snapshot approved bytes outside the writable workspace.
+                mounts = ["--mount", f"type=bind,src={prepared.workspace_dir},dst=/workspace"]
+                if prepared.script_bytes is not None:
                     approved = Path(stage) / "approved.py"
-                    approved.write_bytes(Path(script).read_bytes())
+                    approved.write_bytes(prepared.script_bytes)
                     mounts += ["--mount", f"type=bind,src={approved},dst=/approved.py,readonly"]
-                    command_args = ["python", "-I", "-B", "/approved.py", *tokens[2:]]
                 cidfile = os.path.join(stage, "container.id")
-                docker_args = [
+                user = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "65534:65534"
+                command = [
                     self.policy.runtime, "run", "--rm", "--cidfile", cidfile,
-                    "--network", "none", "--read-only", "--user", "65534:65534",
+                    "--network", "none", "--read-only", "--user", user,
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                     "--pids-limit", str(self.policy.max_pids),
-                    "--memory", f"{self.policy.max_memory_mb}m",
-                    "--cpus", "0.5",
+                    "--memory", f"{self.policy.max_memory_mb}m", "--cpus", "0.5",
                     "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
                     "--workdir", "/workspace",
-                    *mounts, self.policy.image, *command_args,
+                    *mounts, self.policy.image, *prepared.command_args,
                 ]
-                # No shell expansion. A killed client also forces removal of the
-                # container by ID; terminating only docker.exe is insufficient.
                 proc = subprocess.Popen(
-                    docker_args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True,
+                    command, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
+                out, err = bytearray(), bytearray()
+                stdout_reader = threading.Thread(target=_drain_bounded, args=(proc.stdout, out), daemon=True)
+                stderr_reader = threading.Thread(target=_drain_bounded, args=(proc.stderr, err), daemon=True)
+                stdout_reader.start()
+                stderr_reader.start()
                 try:
-                    stdout, stderr = proc.communicate(timeout=self.policy.max_seconds)
+                    proc.wait(timeout=self.policy.max_seconds)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                    proc.communicate()
                     self._force_remove(cidfile)
-                    return "Error [tool_timeout]: Container terminated after execution deadline"
+                    proc.wait(timeout=5)
+                    return "Error [tool_timeout]: Container force-terminated at deadline"
+                finally:
+                    stdout_reader.join(timeout=5)
+                    stderr_reader.join(timeout=5)
                 if proc.returncode:
-                    return f"Error [tool_execution_error]: {(stderr or stdout)[:2000]}"
-                return (stdout or "Command completed (no output).")[:2000]
-        except (json.JSONDecodeError, TypeError, ValueError, OSError) as exc:
-            return f"Error [invalid_arguments]: {exc}"
+                    return f"Error [tool_execution_error]: {(err or out).decode('utf-8', 'replace')[:2000]}"
+                return out.decode("utf-8", "replace")[:2000] or "Command completed (no output)."
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"Error [tool_execution_error]: {exc}"
 
     def _force_remove(self, cidfile: str) -> None:
         try:
-            with open(cidfile, encoding="utf-8") as handle:
-                cid = handle.read().strip()
-            if cid and re.fullmatch(r"[0-9a-f]{12,64}", cid):
-                subprocess.run([self.policy.runtime, "rm", "-f", cid],
-                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=5, check=False)
+            cid = Path(cidfile).read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"[0-9a-f]{12,64}", cid):
+                subprocess.run(
+                    [self.policy.runtime, "rm", "-f", cid],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, timeout=5, check=False,
+                )
         except (OSError, subprocess.TimeoutExpired):
-            # Timeout errors remain failures. The container runtime should also
-            # enforce an external lease/lifetime in deployed environments.
             pass
 
 
 def govern_agent_tools(registry: dict) -> dict:
-    """Drop unsafe execution tools rather than falling back to host execution."""
+    """No model-driven host execution unless explicitly opted into dev mode."""
     tools = dict(registry)
     if os.environ.get("CAPYBARA_UNSAFE_LOCAL_EXEC") == "1":
-        return tools  # Explicit, local-only developer experimentation.
+        return tools
     runner = IsolatedToolExecutor()
     for name in list(tools):
         if get_effect_class(name) != EffectClass.EXEC:
@@ -149,7 +196,5 @@ def govern_agent_tools(registry: dict) -> dict:
         if name == "run_command" and runner.policy.ready():
             tools[name] = runner.run_command
         else:
-            # In particular python_repl cannot share in-process globals with an
-            # untrusted model. It needs a dedicated stateful isolated worker.
             tools.pop(name)
     return tools
