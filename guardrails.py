@@ -17,7 +17,7 @@ TOOL_SAFETY = {
     "recall": "safe",
     "read_file": "safe",
     "list_files": "safe",
-    "write_file": "safe",
+    "write_file": "dangerous",
     
     # MODERATE: Execute but log a notice
     "note": "moderate",

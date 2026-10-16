@@ -16,6 +16,7 @@ from context_manager import ContextManager
 from guardrails import get_safety_tier, request_confirmation
 from llm_client import LLMClient, LLMError
 from tal.action_gate import ActionGate
+from tal.authorization import AuthorizationDenied, ToolAuthorizationService
 from tal.budget import BudgetLimits, BudgetTracker, DeadlineExceeded, ExecutionDeadline, SLMBudgetLimits
 from tal.capability import compute_envelope
 from tal.context_packer import ContextPacker, ExecutionPhase
@@ -71,6 +72,8 @@ class BasicAgent:
         self.current_phase = ExecutionPhase.DISCOVERY
         self.event_log = EventLog()
         self.action_gate = ActionGate()
+        self.authorization = ToolAuthorizationService()
+        self.session_id = os.urandom(16).hex()
         self.manifest: TaskManifest | None = None
         self._pending_terminal_proposal: Proposal | None = None
         
@@ -409,12 +412,32 @@ class BasicAgent:
                 tier = get_safety_tier(tool_name, tal_mode=False)
                 requires_confirmation = (tier == "dangerous")
 
-            if self.guardrails_enabled and requires_confirmation:
-                if not request_confirmation(tool_name, args, approval_callback=approval_callback):
+            approval_granted = not requires_confirmation
+            # TAL approval is mandatory regardless of the legacy guardrails
+            # preference. A missing or failing approval handler never grants an effect.
+            if requires_confirmation and (self.tal_mode or self.guardrails_enabled):
+                try:
+                    approval_granted = request_confirmation(tool_name, args, approval_callback=approval_callback)
+                except (EOFError, OSError, ValueError, RuntimeError):
+                    approval_granted = False
+                if not approval_granted:
                     if self.tal_mode:
-                        self.event_log.append("action_blocked", {"tool": tool_name, "reason": "User denied action", "error_code": ExecutionErrorCode.APPROVAL_DENIED.value})
+                        self.event_log.append("action_blocked", {"tool": tool_name, "reason": "User denied or unavailable", "error_code": ExecutionErrorCode.APPROVAL_DENIED.value})
                     return ToolResult.failure(ExecutionErrorCode.APPROVAL_DENIED, f"{tool_name} was not executed.", stdout=f"Action DENIED by user: {tool_name} was not executed.", retry_safe=False)
-                    
+
+            authorization = None
+            if self.tal_mode:
+                try:
+                    authorization = self.authorization.issue(
+                        task_id=self.manifest.manifest_id if self.manifest else "unstarted",
+                        manifest_hash=self.manifest.manifest_hash if self.manifest else "pre-task",
+                        session_id=self.session_id, tool_name=tool_name, arguments=args,
+                        phase=self.current_phase.value, requires_approval=requires_confirmation,
+                        approval_granted=approval_granted,
+                    )
+                except AuthorizationDenied as exc:
+                    return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
+
             try:
                 tool_function = self.tools[tool_name]
                 if self._execution_deadline and self._execution_deadline.expired:
@@ -422,6 +445,16 @@ class BasicAgent:
                 tool_started_at = time.monotonic()
 
                 def invoke_tool():
+                    if self.tal_mode:
+                        self.authorization.consume(
+                            authorization,
+                            task_id=self.manifest.manifest_id if self.manifest else "unstarted",
+                            manifest_hash=self.manifest.manifest_hash if self.manifest else "pre-task",
+                            session_id=self.session_id, tool_name=tool_name, arguments=args,
+                            phase=self.current_phase.value,
+                        )
+                        if self.manifest and not self.manifest.verify_integrity():
+                            raise AuthorizationDenied("Manifest changed before execution")
                     execution_started_at = time.monotonic()
                     return tool_function(args), execution_started_at
 
@@ -474,6 +507,8 @@ class BasicAgent:
                         "result_data": typed_result.to_dict(),
                     })
                 return typed_result
+            except (AuthorizationDenied,) as exc:
+                return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
             except DeadlineExceeded as exc:
                 result = ToolResult.failure(ExecutionErrorCode.DEADLINE_EXHAUSTED, str(exc), retry_safe=False)
                 if self.tal_mode:

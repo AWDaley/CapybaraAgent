@@ -147,3 +147,14 @@ def test_action_gate_full_pipeline_pass():
     assert res.stage_failed is None
     assert res.sanitized_args is not None
     assert res.sanitized_args["command"] == "python --version"
+
+
+def test_missing_read_file_target_is_never_guessed():
+    gate = ActionGate()
+    caps = compute_envelope(["read_file"], {"read_file": 1})
+    result = gate.evaluate(
+        ActionProposal(thought="", tool_name="read_file", tool_args="{}"),
+        caps, phase=ExecutionPhase.EXECUTION,
+    )
+    assert not result.allowed
+    assert result.stage_failed == "Stage 1: Schema Conformance"

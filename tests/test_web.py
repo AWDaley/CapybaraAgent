@@ -147,3 +147,15 @@ def test_auth_token_protection(monkeypatch):
             assert resp.status == 200
     finally:
         httpd.shutdown()
+
+
+def test_web_cannot_disable_tal_or_approvals(web_server):
+    for config in ({"tal_mode": False}, {"guardrails": False}):
+        req = urllib.request.Request(
+            web_server["url"] + "/api/config",
+            data=json.dumps(config).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(req)
+        assert error.value.code == 403

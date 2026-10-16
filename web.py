@@ -276,6 +276,9 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
             if "provider" in body and body["provider"] not in {"ollama", "openai", "gemini"}:
                 self._send_json({"error": "Unsupported provider"}, status=400)
                 return
+            if body.get("tal_mode") is False or body.get("guardrails") is False:
+                self._send_json({"error": "TAL and approval enforcement cannot be disabled through the web API"}, status=403)
+                return
             if "mode" in body and body["mode"] not in {"1", "2", "3"}:
                 self._send_json({"error": "Unsupported mode"}, status=400)
                 return
@@ -324,7 +327,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
             approval_id = body.get("approval_id")
             approved = body.get("approved")
             
-            if not approval_id or approved is None:
+            if not approval_id or not isinstance(approved, bool):
                 self._send_json({"error": "Missing approval_id or approved boolean"}, status=400)
                 return
                 
@@ -415,7 +418,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                 emit("approval_needed", {"tool": tool_name, "args": args, "id": approval_id})
                 
                 # Pause this thread until the event is set by /api/chat/approve
-                event.wait(timeout=300) # 5 minute timeout
+                event.wait(timeout=60)  # Expire unattended approval prompts
                 
                 with _state_lock:
                     approval = state["pending_approvals"].pop(approval_id, None)

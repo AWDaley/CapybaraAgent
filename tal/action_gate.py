@@ -1,5 +1,3 @@
-import json
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,41 +38,18 @@ class ActionGate:
         tool_name = proposal.tool_name
         raw_args = proposal.tool_args
 
-        # Stage 1: Schema Conformance with Intelligent Auto-Heal
+        # Stage 1: Model-specified arguments only; missing targets must fail
+        # schema validation rather than silently selecting a user's newest file.
         try:
-            # Auto-heal missing "path" for read_file if workspace has active files
-            if tool_name == "read_file":
-                parsed_args = None
-                if isinstance(raw_args, dict):
-                    parsed_args = dict(raw_args)
-                elif isinstance(raw_args, str):
-                    try:
-                        parsed_args = json.loads(raw_args) if raw_args.strip().startswith("{") else None
-                    except Exception:
-                        pass
-                
-                if isinstance(parsed_args, dict) and not parsed_args.get("path"):
-                    import tools.file_tools
-                    ws_dir = getattr(tools.file_tools, "WORKSPACE_DIR", "")
-                    if ws_dir and os.path.exists(ws_dir):
-                        candidates = [f for f in os.listdir(ws_dir) if not f.startswith(".") and os.path.isfile(os.path.join(ws_dir, f))]
-                        if candidates:
-                            candidates.sort(key=lambda f: os.path.getmtime(os.path.join(ws_dir, f)), reverse=True)
-                            parsed_args["path"] = candidates[0]
-                            raw_args = json.dumps(parsed_args)
-
             validated_schema = validate_tool_args(tool_name, raw_args)
             sanitized_dict = validated_schema.to_dict() if hasattr(validated_schema, "to_dict") else validated_schema
         except SchemaViolationError as err:
             return GateResult(
-                allowed=False,
-                stage_failed="Stage 1: Schema Conformance",
-                reason=str(err)
+                allowed=False, stage_failed="Stage 1: Schema Conformance", reason=str(err)
             )
         except Exception as err:
             return GateResult(
-                allowed=False,
-                stage_failed="Stage 1: Schema Conformance",
+                allowed=False, stage_failed="Stage 1: Schema Conformance",
                 reason=f"Failed to parse tool parameters: {err}"
             )
 
