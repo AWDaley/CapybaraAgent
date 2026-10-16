@@ -16,6 +16,7 @@ from context_manager import ContextManager
 from guardrails import get_safety_tier, request_confirmation
 from llm_client import LLMClient, LLMError
 from tal.action_gate import ActionGate
+from tal.authorization import AuthorizationDenied, ToolAuthorizationService
 from tal.budget import BudgetLimits, BudgetTracker, DeadlineExceeded, ExecutionDeadline, SLMBudgetLimits
 from tal.capability import compute_envelope
 from tal.context_packer import ContextPacker, ExecutionPhase
@@ -24,6 +25,7 @@ from tal.epistemic import EpistemicState, EpistemicStore
 from tal.event_store import EventLog
 from tal.execution import ExecutionErrorCode, ToolResult, classify_legacy_tool_output
 from tal.manifest import TaskManifest
+from tal.outcomes import OutcomeStatus
 from tal.proposal_types import (
     ActionProposal,
     CompleteProposal,
@@ -57,6 +59,9 @@ class BasicAgent:
         self.budget_tracker = BudgetTracker(limits=copy.deepcopy(self.budget_limits))
         self.memory = []
         self.tools = tool_registry if tool_registry is not None else TOOL_REGISTRY
+        if self.tal_mode:
+            from execution.isolated import govern_agent_tools
+            self.tools = govern_agent_tools(self.tools)
         self._tool_descriptions_fn = tool_descriptions_fn or get_tool_descriptions
         self.context_manager = ContextManager(tal_mode=tal_mode)
         self.token_counter = TokenCounter()
@@ -71,6 +76,8 @@ class BasicAgent:
         self.current_phase = ExecutionPhase.DISCOVERY
         self.event_log = EventLog()
         self.action_gate = ActionGate()
+        self.authorization = ToolAuthorizationService()
+        self.session_id = os.urandom(16).hex()
         self.manifest: TaskManifest | None = None
         self._pending_terminal_proposal: Proposal | None = None
         
@@ -191,19 +198,34 @@ class BasicAgent:
         self.llm_call_count = 0
         self.event_log = EventLog()
         self.epistemic_store = EpistemicStore()
-        inferred_criteria = (
-            infer_verification_from_goal(user_input)
-            if verification_criteria is None
-            else verification_criteria
-        )
+        from tal.verification import initial_workspace_digest
+        from tools.file_tools import WORKSPACE_DIR
+
+        # Model-inferred filenames are only a heuristic. The goal's artifact
+        # must be new or changed during this task, not an existing stale file.
+        if verification_criteria is None:
+            criteria = []
+            for item in infer_verification_from_goal(user_input):
+                try:
+                    baseline = initial_workspace_digest(WORKSPACE_DIR, item.path)
+                except (ValueError, OSError):
+                    baseline = None
+                criteria.append({
+                    "type": "fresh_file", "path": item.path,
+                    "min_size": item.min_size_bytes,
+                    "initial_digest": baseline,
+                    "source": "inferred_artifact_hint",
+                })
+        else:
+            criteria = copy.deepcopy(verification_criteria)
+        effective_limits = copy.deepcopy(self.budget_limits)
+        effective_limits.max_steps = min(max_steps, effective_limits.max_steps)
+        self.budget_tracker.limits = copy.deepcopy(effective_limits)
         self.manifest = TaskManifest.compile(
             goal=user_input,
             available_tools=self.tools,
-            budget_limits=self.budget_limits,
-            verification_criteria=[
-                {"type": "file_exists", "path": c.path, "min_size": c.min_size_bytes}
-                for c in inferred_criteria
-            ],
+            budget_limits=effective_limits,
+            verification_criteria=criteria,
         )
         
     def _repair_json(self, raw: str) -> str:
@@ -409,20 +431,69 @@ class BasicAgent:
                 tier = get_safety_tier(tool_name, tal_mode=False)
                 requires_confirmation = (tier == "dangerous")
 
-            if self.guardrails_enabled and requires_confirmation:
-                if not request_confirmation(tool_name, args, approval_callback=approval_callback):
+            prepared_command = None
+            secure_runner = None
+            tool_function = self.tools[tool_name]
+            approval_display = args
+            if self.tal_mode and tool_name == "run_command":
+                from execution.isolated import IsolatedToolExecutor
+                candidate = getattr(tool_function, "__self__", None)
+                if isinstance(candidate, IsolatedToolExecutor):
+                    try:
+                        prepared_command = candidate.prepare_command(args)
+                        secure_runner = candidate
+                        if prepared_command.script_sha256:
+                            approval_display += (
+                                "\\nApproved script SHA-256: " + prepared_command.script_sha256
+                            )
+                    except (OSError, ValueError, TypeError) as exc:
+                        return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
+
+            approval_granted = not requires_confirmation
+            # TAL approval is mandatory regardless of the legacy guardrails
+            # preference. A missing or failing approval handler never grants an effect.
+            if requires_confirmation and (self.tal_mode or self.guardrails_enabled):
+                try:
+                    approval_granted = request_confirmation(tool_name, approval_display, approval_callback=approval_callback)
+                except (EOFError, OSError, ValueError, RuntimeError):
+                    approval_granted = False
+                if not approval_granted:
                     if self.tal_mode:
-                        self.event_log.append("action_blocked", {"tool": tool_name, "reason": "User denied action", "error_code": ExecutionErrorCode.APPROVAL_DENIED.value})
+                        self.event_log.append("action_blocked", {"tool": tool_name, "reason": "User denied or unavailable", "error_code": ExecutionErrorCode.APPROVAL_DENIED.value})
                     return ToolResult.failure(ExecutionErrorCode.APPROVAL_DENIED, f"{tool_name} was not executed.", stdout=f"Action DENIED by user: {tool_name} was not executed.", retry_safe=False)
-                    
+
+            authorization = None
+            if self.tal_mode:
+                try:
+                    authorization = self.authorization.issue(
+                        task_id=self.manifest.manifest_id if self.manifest else "unstarted",
+                        manifest_hash=self.manifest.manifest_hash if self.manifest else "pre-task",
+                        session_id=self.session_id, tool_name=tool_name, arguments=args,
+                        phase=self.current_phase.value, requires_approval=requires_confirmation,
+                        approval_granted=approval_granted,
+                    )
+                except AuthorizationDenied as exc:
+                    return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
+
             try:
-                tool_function = self.tools[tool_name]
                 if self._execution_deadline and self._execution_deadline.expired:
                     raise DeadlineExceeded("Pipeline deadline exhausted before tool execution.")
                 tool_started_at = time.monotonic()
 
                 def invoke_tool():
+                    if self.tal_mode:
+                        self.authorization.consume(
+                            authorization,
+                            task_id=self.manifest.manifest_id if self.manifest else "unstarted",
+                            manifest_hash=self.manifest.manifest_hash if self.manifest else "pre-task",
+                            session_id=self.session_id, tool_name=tool_name, arguments=args,
+                            phase=self.current_phase.value,
+                        )
+                        if self.manifest and not self.manifest.verify_integrity():
+                            raise AuthorizationDenied("Manifest changed before execution")
                     execution_started_at = time.monotonic()
+                    if prepared_command is not None:
+                        return secure_runner.run_prepared(prepared_command), execution_started_at
                     return tool_function(args), execution_started_at
 
                 future = self._executor.submit(invoke_tool)
@@ -474,6 +545,8 @@ class BasicAgent:
                         "result_data": typed_result.to_dict(),
                     })
                 return typed_result
+            except (AuthorizationDenied,) as exc:
+                return ToolResult.failure(ExecutionErrorCode.POLICY_DENIED, str(exc), retry_safe=False)
             except DeadlineExceeded as exc:
                 result = ToolResult.failure(ExecutionErrorCode.DEADLINE_EXHAUSTED, str(exc), retry_safe=False)
                 if self.tal_mode:
@@ -682,22 +755,42 @@ class BasicAgent:
                 on_thought(thought)
             
             if final_answer:
+                if self.tal_mode and self.manifest and not self.manifest.verify_integrity():
+                    self.event_log.append("task_escalated", {"reason": "Manifest integrity changed before verification"})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.ESCALATED.value})
+                    return "Error: Manifest integrity check failed before completion"
                 terminal = self._pending_terminal_proposal if self.tal_mode else None
                 if isinstance(terminal, QueryProposal):
                     self.event_log.append("task_waiting_for_user", {"question": terminal.question})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.WAITING_FOR_USER.value})
                     if on_answer:
                         on_answer(final_answer)
                     return final_answer
                 if isinstance(terminal, EscalateProposal):
                     self.event_log.append("task_escalated", {"reason": terminal.reason})
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.ESCALATED.value})
                     if on_error:
                         on_error(final_answer)
                     return final_answer
-                # Independent verification check in TAL mode if criteria exist
+                # A remaining failed tool call is never independent evidence.
+                if self.tal_mode and last_failed_action is not None:
+                    self.event_log.append("task_outcome", {"status": OutcomeStatus.FAILED.value,
+                                                           "reason": "Unresolved tool failure"})
+                    if on_answer:
+                        on_answer(final_answer)
+                    return final_answer
+                verification_passed = False
                 if self.tal_mode and self.manifest and self.manifest.verification_criteria:
                     from tools.file_tools import WORKSPACE_DIR
                     passed, v_messages = run_verification(self.manifest.verification_criteria, workspace_dir=WORKSPACE_DIR)
                     self.event_log.append("verification_run", {"passed": passed, "messages": v_messages})
+                    if passed:
+                        # Filename heuristics establish fresh artifact evidence,
+                        # not whether the artifact fulfills the user's goal.
+                        verification_passed = all(
+                            criterion.get("source") != "inferred_artifact_hint"
+                            for criterion in self.manifest.verification_criteria
+                        )
                     if not passed:
                         # Feed verification failure back into memory and retry
                         failed_obs = f"Verification failed: {'; '.join(v_messages)}"
@@ -712,7 +805,9 @@ class BasicAgent:
                         final_answer = reflected
                 
                 if self.tal_mode:
-                    self.event_log.append("task_completed", {"answer": final_answer})
+                    status = OutcomeStatus.VERIFIED if verification_passed else OutcomeStatus.COMPLETED_UNVERIFIED
+                    self.event_log.append("task_completed", {"answer": final_answer, "outcome": status.value})
+                    self.event_log.append("task_outcome", {"status": status.value})
 
                 if on_answer: on_answer(final_answer)
                 self._prune_memory()
@@ -818,6 +913,10 @@ class BasicAgent:
         )
         
         trace["response"] = result
+        if self.tal_mode:
+            outcomes = [event.data.get("status") for event in self.event_log.events
+                        if event.event_type == "task_outcome"]
+            trace["outcome"] = outcomes[-1] if outcomes else OutcomeStatus.ESCALATED.value
         return trace
 
     def run_turn_streaming(

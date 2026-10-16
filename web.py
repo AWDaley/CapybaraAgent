@@ -59,6 +59,21 @@ def _get_web_session(session_id):
         return _web_sessions[session_id]
 
 
+def _terminal_outcome(agent) -> str:
+    """Expose only trustworthy task-wide statuses to the web interface."""
+    from tal.outcomes import OutcomeStatus
+
+    # Planning/orchestration currently do not provide one unified task-wide
+    # verification result. Their step-level evidence must not be promoted to a
+    # verified overall task until Phase 2 unifies execution paths.
+    if not isinstance(agent, BasicAgent):
+        return OutcomeStatus.COMPLETED_UNVERIFIED.value
+    for event in reversed(agent.event_log.events):
+        if event.event_type == "task_outcome":
+            return event.data.get("status", OutcomeStatus.COMPLETED_UNVERIFIED.value)
+    return OutcomeStatus.COMPLETED_UNVERIFIED.value
+
+
 def _shutdown_agent(agent):
     """Release an agent's executor when a session changes configuration."""
     basic = getattr(agent, "basic_agent", agent)
@@ -276,6 +291,9 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
             if "provider" in body and body["provider"] not in {"ollama", "openai", "gemini"}:
                 self._send_json({"error": "Unsupported provider"}, status=400)
                 return
+            if body.get("tal_mode") is False or body.get("guardrails") is False:
+                self._send_json({"error": "TAL and approval enforcement cannot be disabled through the web API"}, status=403)
+                return
             if "mode" in body and body["mode"] not in {"1", "2", "3"}:
                 self._send_json({"error": "Unsupported mode"}, status=400)
                 return
@@ -324,7 +342,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
             approval_id = body.get("approval_id")
             approved = body.get("approved")
             
-            if not approval_id or approved is None:
+            if not approval_id or not isinstance(approved, bool):
                 self._send_json({"error": "Missing approval_id or approved boolean"}, status=400)
                 return
                 
@@ -369,6 +387,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                     else:
                          trace = agent.run_turn_with_trace(message, approval_callback=_default_deny_callback)
                      
+                trace.setdefault("outcome", _terminal_outcome(agent))
                 # Auto-save
                 mem = []
                 if hasattr(agent, 'memory'): mem = agent.memory
@@ -415,7 +434,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                 emit("approval_needed", {"tool": tool_name, "args": args, "id": approval_id})
                 
                 # Pause this thread until the event is set by /api/chat/approve
-                event.wait(timeout=300) # 5 minute timeout
+                event.wait(timeout=60)  # Expire unattended approval prompts
                 
                 with _state_lock:
                     approval = state["pending_approvals"].pop(approval_id, None)
@@ -439,6 +458,7 @@ class CapybaraHandler(http.server.SimpleHTTPRequestHandler):
                 if hasattr(agent, 'token_counter'): tokens = agent.token_counter.total
                 elif hasattr(agent, 'basic_agent') and hasattr(agent.basic_agent, 'token_counter'): tokens = agent.basic_agent.token_counter.total
                 
+                emit("outcome", {"status": _terminal_outcome(agent)})
                 emit("done", {"tokens_used": tokens})
                 
                 # Auto-save
@@ -460,6 +480,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 def start_server(host="localhost", port=8000):
+    if host not in {"localhost", "127.0.0.1", "::1"} and os.environ.get("CAPYBARA_UNSAFE_LOCAL_EXEC") == "1":
+        raise RuntimeError("Unsafe local development execution cannot be exposed over a network.")
     if host not in {"localhost", "127.0.0.1", "::1"} and not _auth_token:
         raise RuntimeError("CAPYBARA_AUTH_TOKEN is required when binding beyond loopback.")
     with ThreadingHTTPServer((host, port), CapybaraHandler) as httpd:

@@ -424,12 +424,14 @@ class StructuredPipelineRunner:
                             if not passed:
                                 remediation_feedback = "\n".join(f"- {m}" for m in messages)
                         else:
-                            step_passed = True
-                            last_verif_messages = [mat_msg]
+                            step_passed = False
+                            last_verif_messages = ["No independent acceptance criteria for materialized artifact"]
+                            remediation_feedback = last_verif_messages[0]
                 else:
-                    step_passed = True
-                    last_output = f"Harness step [{step.step_id}] executed."
-                    last_verif_messages = ["No output spec; step passed."]
+                    step_passed = False
+                    last_output = f"Harness step [{step.step_id}] executed without verifiable effects."
+                    last_verif_messages = ["No independent acceptance criteria for harness step"]
+                    remediation_feedback = last_verif_messages[0]
 
             # --- Branch B: Specialist LLM Agent Turn ---
             else:
@@ -736,8 +738,9 @@ class StructuredPipelineRunner:
                             if on_thought:
                                 on_thought(f"❌ Step [{step.step_id}] FAILED verification gate:\n{remediation_feedback}")
                     else:
-                        step_passed = True
-                        last_verif_messages = ["No explicit verification criteria (auto-passed)"]
+                        step_passed = False
+                        last_verif_messages = ["No independent acceptance criteria: completion unverified"]
+                        remediation_feedback = last_verif_messages[0]
                         if on_thought:
                             on_thought(f"✅ Step [{step.step_id}] completed.")
 

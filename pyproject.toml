@@ -17,7 +17,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["agents", "memory", "providers", "tal", "tools"]
+packages = ["agents", "execution", "memory", "providers", "tal", "tools"]
 py-modules = [
     "agent", "context_manager", "guardrails", "llm_client", "main",
     "planning_agent", "prompt_loader", "tal_test_report", "tal_test_runner",

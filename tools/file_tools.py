@@ -2,6 +2,8 @@ import json
 import os
 from typing import Any
 
+from tal.safe_paths import resolve_workspace_path
+
 # Sandbox directory for file operations
 # Sandbox directory for file operations
 WORKSPACE_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "workspace"))
@@ -9,10 +11,7 @@ os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 def _get_safe_path(filename: str) -> str:
     """Ensures the file path stays within the sandbox directory."""
-    resolved = os.path.realpath(os.path.join(WORKSPACE_DIR, filename))
-    if os.path.commonpath([WORKSPACE_DIR, resolved]) != WORKSPACE_DIR:
-        raise ValueError(f"Path '{filename}' is outside workspace")
-    return resolved
+    return resolve_workspace_path(WORKSPACE_DIR, filename)
 
 def _parse_tool_args(args: Any) -> dict:
     """Helper to parse tool args whether dict, JSON string, or repairable string."""
@@ -50,6 +49,7 @@ def write_file(args: str) -> str:
                 return f"Error: Python SyntaxError in '{filename}' at line {se.lineno}: {se.msg}. The script appears truncated or malformed. Please output the complete, valid script."
 
         safe_path = _get_safe_path(filename)
+        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
         with open(safe_path, "w", encoding="utf-8") as f:
             f.write(content)
         return f"File written successfully: {filename}"

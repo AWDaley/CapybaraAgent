@@ -65,3 +65,13 @@ def isolated_knowledge_store(monkeypatch):
     yield store
     
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _trusted_test_execution_mode(monkeypatch):
+    """Legacy REPL fixture uses only trusted test scripts, not model-supplied code.
+
+    Production defaults to no in-process execution. Individual security tests
+    explicitly clear this environment variable to assert the safe default.
+    """
+    monkeypatch.setenv("CAPYBARA_UNSAFE_LOCAL_EXEC", "1")

@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 from typing import Any
@@ -34,6 +35,42 @@ class FileExistsCheck(VerificationCriterion):
         if size < self.min_size_bytes:
             return False, f"File '{self.path}' size ({size} bytes) is less than required ({self.min_size_bytes} bytes)"
         return True, f"File '{self.path}' verified ({size} bytes)"
+
+
+class FreshFileCheck(VerificationCriterion):
+    """Require a new or content-changed artifact relative to task intake."""
+
+    def __init__(self, path: str, initial_digest: str | None = None, min_size_bytes: int = 1):
+        self.path = path
+        self.initial_digest = initial_digest
+        self.min_size_bytes = min_size_bytes
+
+    def check(self, workspace_dir: str = "") -> tuple[bool, str]:
+        try:
+            full_path = _workspace_path(workspace_dir, self.path)
+            if not os.path.isfile(full_path):
+                return False, f"Fresh artifact '{self.path}' does not exist"
+            if os.path.getsize(full_path) < self.min_size_bytes:
+                return False, f"Fresh artifact '{self.path}' is smaller than required"
+            current = hash_file(full_path)
+            if current == self.initial_digest:
+                return False, f"Artifact '{self.path}' is unchanged from task start"
+            return True, f"Fresh artifact '{self.path}' verified (SHA-256 {current})"
+        except (OSError, ValueError) as exc:
+            return False, f"Invalid fresh artifact '{self.path}': {exc}"
+
+
+def hash_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def initial_workspace_digest(workspace_dir: str, relative_path: str) -> str | None:
+    target = _workspace_path(workspace_dir, relative_path)
+    return hash_file(target) if os.path.isfile(target) else None
 
 
 class ExitCodeCheck(VerificationCriterion):
@@ -289,6 +326,11 @@ def create_criterion_from_dict(d: dict[str, Any]) -> VerificationCriterion:
     ctype = d.get("type", "").lower()
     if ctype == "file_exists":
         return FileExistsCheck(path=d.get("path", ""), min_size_bytes=int(d.get("min_size", 0)))
+    elif ctype == "fresh_file":
+        return FreshFileCheck(
+            path=d.get("path", ""), initial_digest=d.get("initial_digest"),
+            min_size_bytes=int(d.get("min_size", 1)),
+        )
     elif ctype == "exit_code":
         return ExitCodeCheck(command=d.get("command", ""), expected_code=int(d.get("expected_code", 0)))
     elif ctype == "regex_match":
@@ -337,7 +379,7 @@ def run_verification(
 ) -> tuple[bool, list[str]]:
     """Runs all verification criteria. Returns (all_passed, messages)."""
     if not criteria:
-        return True, ["No verification criteria specified"]
+        return False, ["No verification criteria specified; completion is unverified"]
 
     all_passed = True
     messages = []

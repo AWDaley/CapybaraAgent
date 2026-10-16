@@ -1,6 +1,8 @@
 import json
 import uuid
 
+import pytest
+
 from tal.materializer import OutputMaterializer
 from tal.safe_eval import SafeExpressionError, evaluate_expression
 from tal.safe_paths import resolve_workspace_path
@@ -74,3 +76,34 @@ def test_session_storage_is_namespaced():
     first = SessionManager(session_namespace=str(uuid.uuid4()))
     second = SessionManager(session_namespace=str(uuid.uuid4()))
     assert first.sessions_dir != second.sessions_dir
+
+@pytest.mark.parametrize("unsafe_path", [
+    "../escape", "nested/../escape", "..\\escape",
+    "C:/outside.txt", "C:\\outside.txt", "C:relative.txt",
+    "\\\\server\\share\\file.txt", "//server/share/file.txt",
+    "/tmp/outside", "\\Windows\\system.ini", "\\\\?\\C:\\secret.txt",
+])
+def test_cross_platform_absolute_and_traversal_rejected(temp_workspace, unsafe_path):
+    with pytest.raises(ValueError):
+        resolve_workspace_path(temp_workspace, unsafe_path)
+
+
+def test_relative_nested_workspace_path_allowed(temp_workspace):
+    import os
+    assert os.path.commonpath([os.path.realpath(temp_workspace), resolve_workspace_path(temp_workspace, "reports/2026/out.json")]) == os.path.realpath(temp_workspace)
+
+
+def test_workspace_symlink_escape_is_rejected(temp_workspace, tmp_path):
+    target = tmp_path / "outside"
+    target.mkdir()
+    link = tmp_path / "linked"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating symlinks is unavailable on this platform")
+    # Ensure the symlink itself is inside the temporary workspace.
+    import os
+    inner = os.path.join(temp_workspace, "out")
+    os.symlink(target, inner, target_is_directory=True)
+    with pytest.raises(ValueError):
+        resolve_workspace_path(temp_workspace, "out/secret.txt")

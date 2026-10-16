@@ -17,6 +17,7 @@ import urllib.request
 from typing import Any
 
 from tools.basic_tools import _knowledge_store
+from tal.safe_paths import validate_relative_workspace_path
 
 
 # --- .env loader -----------------------------------------------------------
@@ -287,8 +288,9 @@ def run_command(args: str) -> str:
             return "Error: Empty command."
 
         for token in tokens[1:]:
-            normalized = token.replace("\\", "/")
-            if os.path.isabs(token) or normalized == ".." or normalized.startswith("../") or "/../" in normalized:
+            try:
+                validate_relative_workspace_path(token)
+            except ValueError:
                 return "Error: Command arguments cannot reference paths outside the workspace."
             
         # Whitelist of safe commands

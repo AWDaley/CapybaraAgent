@@ -543,3 +543,11 @@ input[type="checkbox"] { accent-color: var(--accent-teal); width: 16px; height: 
     /* .left-sidebar { transform: translateX(0); position: relative; } */
     /* .app-container { flex-direction: row; } */
 }
+
+
+.verification-outcome {
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    opacity: 0.8;
+    font-style: italic;
+}
