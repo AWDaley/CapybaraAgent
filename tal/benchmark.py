@@ -73,7 +73,7 @@ class AcceptanceOracle:
         # JSON roundtrip enforces size, simple serializable observations, and
         # forbids NaN/Infinity and arbitrary executable expressions.
         try:
-            state_json = _canonical_json(state)
+            state_json = json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False)
             if len(state_json) > 65536:
                 raise ValueError("oracle.state_equals exceeds bounded JSON size")
             state = json.loads(state_json)
