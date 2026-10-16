@@ -145,6 +145,8 @@ def get_agent(session_id="legacy"):
             tal_mode=config.get("tal_mode", True),
         )
         
+        # Verification of browser task graphs must never read the CLI REPL.
+        basic.repl_globals_provider = lambda: state["repl_scope"].globals
         mode = config["mode"]
         if mode == "2":
             state["agent"] = PlanningAgent(basic, llm, tal_mode=config.get("tal_mode", True))
@@ -160,7 +162,10 @@ def get_agent(session_id="legacy"):
             )
         else:
             state["agent"] = basic
-            
+
+        if mode == "3":
+            state["agent"].repl_globals_provider = lambda: state["repl_scope"].globals
+
         # Start fresh session file for the web UI by default if none loaded
         if not state["session_manager"].current_session_file:
              state["session_manager"].start_new_session()

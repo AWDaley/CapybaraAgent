@@ -121,6 +121,7 @@ class PlanningAgent:
             tal_mode=True,
             use_slm_profile=self.basic_agent.use_slm_profile,
             tool_registry=self.basic_agent.tools,
+            repl_globals_provider=getattr(self.basic_agent, "repl_globals_provider", None),
         )
         graph_result = TaskGraphRunner(pipeline_runner).run(
             graph, approval_callback=approval_callback,

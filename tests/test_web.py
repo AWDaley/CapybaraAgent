@@ -326,3 +326,20 @@ def test_memory_fact_does_not_disable_ssl_verification(monkeypatch):
     secure_context = external._get_ssl_context()
     assert secure_context.verify_mode == ssl.CERT_REQUIRED
     assert secure_context.check_hostname is True
+
+
+def test_browser_repl_evidence_is_never_shared():
+    import uuid
+    import web
+
+    first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
+    first = web._get_web_session(first_id)
+    second = web._get_web_session(second_id)
+    first["repl_scope"].globals["secret_answer"] = 100
+    second["repl_scope"].globals["secret_answer"] = 200
+
+    first_agent = web.get_agent(first_id)
+    second_agent = web.get_agent(second_id)
+    assert first_agent.repl_globals_provider()["secret_answer"] == 100
+    assert second_agent.repl_globals_provider()["secret_answer"] == 200
+    assert first_agent.repl_globals_provider() is not second_agent.repl_globals_provider()
