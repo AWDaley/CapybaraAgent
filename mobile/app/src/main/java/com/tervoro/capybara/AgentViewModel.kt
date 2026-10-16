@@ -72,12 +72,26 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private var activeRun: Job? = null
 
     init {
-        val installedPath = modelManager.installedPath()
-        if (BuildConfig.FLAVOR == "demo" || installedPath != null) {
-            initializeRuntime(installedPath)
+        if (BuildConfig.FLAVOR == "demo") {
+            initializeRuntime(null)
         } else {
-            state.update {
-                it.copy(modelStatus = "Import a .litertlm model to begin", modelReady = false)
+            // Hash-verifying multi-gigabyte model packages must not block UI.
+            viewModelScope.launch(Dispatchers.IO) {
+                val installed = runCatching { modelManager.installedPath() }.getOrNull()
+                if (installed != null) {
+                    initializeRuntime(installed)
+                } else {
+                    state.update {
+                        it.copy(
+                            modelStatus = if (BuildConfig.DEBUG) {
+                                "Import a .litertlm model to begin"
+                            } else {
+                                "Import an approved .litertlm model (pinned SHA-256 required)"
+                            },
+                            modelReady = false,
+                        )
+                    }
+                }
             }
         }
     }
@@ -105,7 +119,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 state.update { it.copy(modelReady = true, modelStatus = "Ready · ${runtime.displayName}", error = null) }
             }.onFailure { error ->
                 state.update {
-                    it.copy(modelReady = false, modelStatus = "Model unavailable", error = error.message ?: "Model import failed")
+                    it.copy(
+                        modelReady = runtime.isReady,
+                        modelStatus = if (runtime.isReady) "Previous model restored" else "Model unavailable",
+                        error = error.message ?: "Model import failed",
+                    )
                 }
             }
         }
@@ -202,7 +220,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         active.cancel(CancellationException("Task cancelled by user"))
     }
 
-    fun resolveApproval(decision: ApprovalDecision) {
+    fun resolveApproval(requestId: String, decision: ApprovalDecision) {
+        // Android authentication callbacks can arrive after cancellation or
+        // after a new task starts. Bind the callback to its original request.
+        if (state.value.pendingApproval?.requestId != requestId) return
         approvalDeferred?.complete(decision)
         approvalDeferred = null
         state.update { it.copy(pendingApproval = null) }
@@ -227,7 +248,19 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val deferred = CompletableDeferred<ApprovalDecision>()
         approvalDeferred = deferred
         state.update { it.copy(pendingApproval = request, phase = "waiting for approval") }
-        return deferred.await()
+        try {
+            return deferred.await()
+        } finally {
+            // Ensure cancellation/expiry does not strand an approval sheet.
+            if (approvalDeferred === deferred) {
+                approvalDeferred = null
+                state.update {
+                    if (it.pendingApproval?.requestId == request.requestId) {
+                        it.copy(pendingApproval = null)
+                    } else it
+                }
+            }
+        }
     }
 
     override fun onCleared() {

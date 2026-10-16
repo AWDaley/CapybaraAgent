@@ -24,7 +24,33 @@ class ModelManager(
     }
     private val modelFile = File(modelDirectory, "active.litertlm")
 
-    fun installedPath(): String? = modelFile.takeIf(File::isFile)?.absolutePath
+    fun installedPath(): String? {
+        if (!modelFile.isFile) return null
+        if (BuildConfig.DEBUG && BuildConfig.APPROVED_MODEL_SHA256.isEmpty()) {
+            return modelFile.absolutePath
+        }
+        val expected = BuildConfig.APPROVED_MODEL_SHA256
+        if (expected.isBlank()) return null // release without a pin fails closed
+        val actual = sha256File(modelFile)
+        return modelFile.takeIf { actual == expected }?.absolutePath
+    }
+
+    private fun isApproved(digest: String): Boolean =
+        (BuildConfig.DEBUG && BuildConfig.APPROVED_MODEL_SHA256.isEmpty()) ||
+            digest.equals(BuildConfig.APPROVED_MODEL_SHA256, ignoreCase = true)
+
+    private fun sha256File(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { stream ->
+            val bytes = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = stream.read(bytes)
+                if (read < 0) break
+                digest.update(bytes, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     fun stage(uri: Uri): StagedModel {
         val displayName = queryDisplayName(uri)
@@ -34,24 +60,33 @@ class ModelManager(
         val temporary = File(modelDirectory, "staged-${UUID.randomUUID()}.litertlm")
         val digest = MessageDigest.getInstance("SHA-256")
         var total = 0L
-        context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Unable to open selected model" }
-            FileOutputStream(temporary).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    require(total <= MAX_MODEL_BYTES) { "Model exceeds the 8 GiB mobile import limit" }
-                    digest.update(buffer, 0, read)
-                    output.write(buffer, 0, read)
+        var completed = false
+        try {
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Unable to open selected model" }
+                FileOutputStream(temporary).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        require(total <= MAX_MODEL_BYTES) { "Model exceeds the 8 GiB mobile import limit" }
+                        digest.update(buffer, 0, read)
+                        output.write(buffer, 0, read)
+                    }
+                    output.fd.sync()
                 }
-                output.fd.sync()
             }
+            require(total > 1_024) { "Selected model package is empty or truncated" }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            require(isApproved(hash)) {
+                "Model SHA-256 is not on the approved package list"
+            }
+            completed = true
+            return StagedModel(InstalledModel(temporary.absolutePath, hash, total))
+        } finally {
+            if (!completed) temporary.delete()
         }
-        require(total > 1_024) { "Selected model package is empty or truncated" }
-        val hash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-        return StagedModel(InstalledModel(temporary.absolutePath, hash, total))
     }
 
     /** Atomically publishes a model that the caller has already initialized successfully. */
@@ -68,6 +103,9 @@ class ModelManager(
             if (rollback.isFile) java.nio.file.Files.move(rollback.toPath(), modelFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             throw error
         }
+        // The former model may be large; do not retain unlimited rollback
+        // copies once the replacement was promoted successfully.
+        if (rollback.isFile) rollback.delete()
         return staged.model.copy(path = modelFile.absolutePath)
     }
 

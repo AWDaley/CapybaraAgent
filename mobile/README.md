@@ -18,7 +18,13 @@ This first vertical slice is intentionally narrow and executable:
 4. Run `./gradlew :tal-core:test :app:assembleDemoDebug` from the `mobile` directory.
 5. For real inference, select `litertDebug`, install the app on an arm64 phone, and use the add button to import a compatible `.litertlm` model.
 
-The project does not download a model. Model licensing, signature allowlists, and distribution policy must be decided before a production release.
+The project does not download a model. Release builds enforce a pinned SHA-256
+on imported and previously installed LiteRT-LM packages. Configure the Gradle
+property `tervoroApprovedModelSha256=<64-character digest>` for a production
+build; release without a valid pin refuses model activation. Debug builds can
+import unpinned models for local testing. A digest validates byte identity,
+**not model provenance, licensing, publisher identity, or a digital signature**;
+signed manifests and distribution policy remain required before production release.
 
 ## Current trust boundary
 
@@ -55,3 +61,17 @@ This protects data at rest and makes local log modification detectable by the ap
 5. Add thermal, memory, battery, context, and token budgets with device-class certification.
 6. Add adversarial proposal, prompt-injection, model-package, crash/replay, idempotency, and biometric lifecycle tests on physical devices.
 7. Add an iOS adapter only after the common TAL conformance suite passes independently of Android.
+
+
+## Mobile smoke tests and CI
+
+The Android workflow builds the demo flavor and runs pure Kotlin TAL tests plus
+demo-provider JSON regression tests; it intentionally avoids downloading a
+third-party model. Use `bash ./gradlew :tal-core:test :app:assembleDemoDebug
+:app:testDemoDebugUnitTest` from `mobile/` to reproduce it.
+
+Write approvals bind to a specific `ApprovalRequest.requestId`. A cancelled
+or failed biometric prompt resolves as DENIED, and late callbacks cannot approve
+a different task. Model imports delete abandoned staged files on all failure
+paths and discard successful rollback copies. Device-specific biometric,
+Keystore, GPU and performance behavior still requires physical-device testing.

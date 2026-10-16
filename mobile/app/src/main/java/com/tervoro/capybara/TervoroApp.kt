@@ -121,10 +121,13 @@ fun TervoroApp(
                 request = request,
                 onApprove = {
                     onAuthenticate { approved, _ ->
-                        if (approved) viewModel.resolveApproval(ApprovalDecision.APPROVED)
+                        // A cancelled/stale biometric callback may never
+                        // authorize another task's pending write.
+                        val decision = if (approved) ApprovalDecision.APPROVED else ApprovalDecision.DENIED
+                        viewModel.resolveApproval(request.requestId, decision)
                     }
                 },
-                onDeny = { viewModel.resolveApproval(ApprovalDecision.DENIED) },
+                onDeny = { viewModel.resolveApproval(request.requestId, ApprovalDecision.DENIED) },
             )
         }
     }
