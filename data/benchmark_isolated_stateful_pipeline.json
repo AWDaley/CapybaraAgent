@@ -1,0 +1,54 @@
+{
+  "pipeline_id": "benchmark_isolated_stateful_v1",
+  "title": "Stateful Python sandbox verification fixture",
+  "global_context": {
+    "purpose": "Exercise isolated state without host interpreter execution"
+  },
+  "max_steps": 12,
+  "max_time_seconds": 180,
+  "pipeline": [
+    {
+      "step_id": "calculate_python_state",
+      "specialist": "coder",
+      "objective": "Use python_repl to construct a dict named benchmark_summary with keys total equal to 20 and average equal to 5.0. Use the list [2,4,6,8].",
+      "tool_allowlist": [
+        "python_repl"
+      ],
+      "max_retries": 0,
+      "max_steps": 4,
+      "state_exports": [
+        "benchmark_summary"
+      ],
+      "verification_criteria": [
+        {
+          "type": "repl_variable",
+          "variable": "benchmark_summary",
+          "assertion": "benchmark_summary.get('total') == 20 and benchmark_summary.get('average') == 5.0"
+        }
+      ]
+    },
+    {
+      "step_id": "export_verified_summary",
+      "specialist": "harness",
+      "objective": "Materialize the independently verified Python state as JSON",
+      "output_spec": {
+        "spec_type": "repl_variable",
+        "source_variable": "benchmark_summary",
+        "target_file": "benchmark_summary.json"
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "benchmark_summary.json",
+          "required_keys": [
+            "total",
+            "average"
+          ],
+          "min_size": 12
+        }
+      ],
+      "max_retries": 0,
+      "max_steps": 1
+    }
+  ]
+}

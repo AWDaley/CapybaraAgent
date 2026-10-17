@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from execution.isolated import ExecutionPolicy
+from execution.stateful import StatefulSandbox, StatefulSandboxError
 from tal.benchmark_evidence import collect_benchmark_evidence
 from tal.effect_classes import EffectClass, get_effect_class
 from tal.pipeline_runner import StructuredPipelineRunner
@@ -27,6 +29,15 @@ from tools import TOOL_REGISTRY
 _ALLOWED_BENCHMARK_TOOLS = frozenset({
     "calc", "count words", "convert units", "read_file", "list_files", "write_file",
 })
+_ISOLATED_REPL_TOOLS = frozenset({"python_repl"})
+_REPL_CHECKS = frozenset({
+    "repl_variable", "repl_state", "repl_variable_exists",
+    "repl_graph", "repl_adjacency", "repl_adjacency_graph",
+})
+_REPL_OUTPUT_SPECS = frozenset({
+    "repl_template", "repl_variable", "repl_expr", "expr", "expression",
+})
+_BENCHMARK_REPL_EXPORT_LIMIT = 96
 _ALLOWED_CHECKS = frozenset({
     "file_exists", "json_schema", "ast_syntax", "python_syntax",
     "cross_entity", "cross_reference", "cross_entity_consistency",
@@ -69,7 +80,9 @@ def _has_runtime_expressions(value: Any) -> bool:
     return False
 
 
-def pipeline_blocker(pipeline: StructuredPipeline) -> str | None:
+def pipeline_blocker(
+    pipeline: StructuredPipeline, isolated_repl_available: bool = False,
+) -> str | None:
     """Preflight all stages before any model call or side effect occurs."""
     for step in pipeline.steps:
         prefix = f"Step {step.step_id}: "
@@ -77,27 +90,91 @@ def pipeline_blocker(pipeline: StructuredPipeline) -> str | None:
             if step.tool_allowlist is None:
                 return prefix + "explicit tool_allowlist is required for a paired benchmark"
             missing = set(step.tool_allowlist) - _ALLOWED_BENCHMARK_TOOLS
+            if isolated_repl_available:
+                missing -= _ISOLATED_REPL_TOOLS
             if missing:
-                return prefix + f"unsupported capabilities {', '.join(sorted(missing))}; no stateful isolated REPL backend"
+                return prefix + (
+                    f"unsupported capabilities {', '.join(sorted(missing))}; "
+                    "no approved isolated execution capability"
+                )
         if not step.verification_criteria:
             return prefix + "independent step verification is required"
         for criterion in step.verification_criteria:
-            if not isinstance(criterion, dict) or criterion.get("type") not in _ALLOWED_CHECKS:
+            supported = _ALLOWED_CHECKS | (_REPL_CHECKS if isolated_repl_available else frozenset())
+            if not isinstance(criterion, dict) or criterion.get("type") not in supported:
                 return prefix + "unsupported verification criteria require an isolated stateful worker"
         spec = step.output_spec
         if spec is not None:
-            if spec.spec_type not in _ALLOWED_OUTPUT_SPECS or _has_runtime_expressions(spec.template):
+            allowed_specs = _ALLOWED_OUTPUT_SPECS | (
+                _REPL_OUTPUT_SPECS if isolated_repl_available else frozenset()
+            )
+            if spec.spec_type not in allowed_specs:
+                return prefix + "runtime-driven output materialization requires an isolated stateful worker"
+            if not isolated_repl_available and _has_runtime_expressions(spec.template):
                 return prefix + "runtime-driven output materialization requires an isolated stateful worker"
     return None
 
 
-def _restricted_registry() -> dict:
-    return {
+def _restricted_registry(sandbox: StatefulSandbox | None = None) -> dict:
+    tools = {
         name: TOOL_REGISTRY[name]
         for name in _ALLOWED_BENCHMARK_TOOLS
         if name in TOOL_REGISTRY
         and get_effect_class(name) in {EffectClass.READ, EffectClass.WRITE}
     }
+    if sandbox is not None and sandbox.ready:
+        # The only EXEC effect ever admitted here is this exact bound
+        # method of a digest-pinned OS container. Never use the module's
+        # host in-process python_repl, even in unsafe developer mode.
+        tools["python_repl"] = sandbox.execute_tool
+    return tools
+
+
+def _requires_stateful_repl(pipeline: StructuredPipeline) -> bool:
+    return any(
+        "python_repl" in (step.tool_allowlist or ())
+        or any(c.get("type") in _REPL_CHECKS for c in step.verification_criteria)
+        or (step.output_spec is not None and (
+            step.output_spec.spec_type in _REPL_OUTPUT_SPECS
+            or _has_runtime_expressions(step.output_spec.template)
+        ))
+        for step in pipeline.steps
+    )
+
+
+def _snapshot_names(pipeline: StructuredPipeline, additional: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Allowlisted REPL exports; never expose the worker's entire interpreter."""
+    names: set[str] = set(additional)
+    pattern = re.compile(r"\$eval:([a-zA-Z_][a-zA-Z_0-9]*)")
+
+    def scan(value: Any) -> None:
+        if isinstance(value, str):
+            names.update(pattern.findall(value))
+        elif isinstance(value, dict):
+            for item in value.values():
+                scan(item)
+        elif isinstance(value, list):
+            for item in value:
+                scan(item)
+
+    for step in pipeline.steps:
+        names.update(str(name) for name in step.state_exports)
+        for check in step.verification_criteria:
+            name = check.get("variable", check.get("var_name"))
+            if isinstance(name, str):
+                names.add(name)
+        spec = step.output_spec
+        if spec is not None:
+            if spec.source_variable:
+                names.add(str(spec.source_variable))
+            if spec.eval_expr:
+                scan("$eval:" + str(spec.eval_expr))
+            scan(spec.template)
+    if len(names) > _BENCHMARK_REPL_EXPORT_LIMIT or any(
+        not name.isidentifier() or name.startswith("_") for name in names
+    ):
+        raise ValueError("Benchmark requires too many or invalid state export names")
+    return tuple(sorted(names))
 
 
 def _unsupported(reason: str, tal_mode: bool) -> RunMetrics:
@@ -118,26 +195,38 @@ def _run_arm(
 
     tracker = TrackingLLMClient(test_runner.llm_client)
     started = time.monotonic()
+    needs_repl = _requires_stateful_repl(pipeline)
     with sandbox_workspace() as workspace:
-        # The single registry and input pipeline are identical in both arms.
-        runner = StructuredPipelineRunner(
-            llm_client=tracker,
-            workspace_dir=workspace,
-            verbose=False,
-            knowledge_store=None,
-            guardrails_enabled=True,
-            tal_mode=tal_mode,
-            use_slm_profile=test_runner.use_slm_profile,
-            tool_registry=_restricted_registry(),
-            # Never accidentally inspect another invocation's global REPL.
-            repl_globals_provider=lambda: {},
-        )
-        # Mutating workspace writes are denied; only the deterministic harness
-        # may produce expected files in this known-empty trial workspace.
+        sandbox = StatefulSandbox(workspace) if needs_repl else None
+        if sandbox is not None and not sandbox.ready:
+            return _unsupported("Digest-pinned container worker unavailable", tal_mode)
         try:
-            result = runner.run(pipeline, approval_callback=lambda *_: False)
+            if sandbox is not None:
+                try:
+                    sandbox.__enter__()
+                except (OSError, ValueError, StatefulSandboxError) as exc:
+                    return _unsupported("Sandbox startup failed: " + str(exc)[:120], tal_mode)
+            state_keys = _snapshot_names(pipeline, evidence_keys) if sandbox else ()
+            provider = (lambda: sandbox.snapshot(state_keys)) if sandbox else (lambda: {})
+            runner = StructuredPipelineRunner(
+                llm_client=tracker, workspace_dir=workspace, verbose=False,
+                knowledge_store=None, guardrails_enabled=True,
+                tal_mode=tal_mode, use_slm_profile=test_runner.use_slm_profile,
+                tool_registry=_restricted_registry(sandbox),
+                repl_globals_provider=provider,
+            )
+            # A fixture supplied by the caller and confined to a new scratch
+            # workspace constitutes this benchmark-only authorization. Only
+            # declared local writes/isolated Python are eligible.
+            def approve(tool_name: str, _args: str) -> bool:
+                return tool_name in {"python_repl", "write_file"} and (
+                    tool_name != "python_repl" or (sandbox is not None and sandbox.ready)
+                )
+
+            result = runner.run(pipeline, approval_callback=approve)
             observed_state, observed_artifacts = collect_benchmark_evidence(
                 workspace, evidence_keys, artifact_paths,
+                state_provider=provider,
             )
             outcome = "completed_unverified" if result.success else "failed"
             return RunMetrics(
@@ -145,8 +234,7 @@ def _run_arm(
                 error=result.error, outcome=outcome,
                 final_answer=result.final_output,
                 wall_clock_time=time.monotonic() - started,
-                steps_taken=result.steps_consumed,
-                llm_calls=tracker.llm_calls,
+                steps_taken=result.steps_consumed, llm_calls=tracker.llm_calls,
                 input_tokens=tracker.input_tokens,
                 output_tokens=tracker.output_tokens,
                 total_tokens=tracker.total_tokens,
@@ -169,6 +257,9 @@ def _run_arm(
                 outcome="failed", error=f"Pipeline execution error: {exc}",
                 wall_clock_time=time.monotonic() - started,
             )
+        finally:
+            if sandbox is not None:
+                sandbox.close()
 
 
 def run_pipeline_pair(
@@ -179,7 +270,10 @@ def run_pipeline_pair(
 ) -> TALTestResult:
     """Run both arms with one pipeline, snapshotting evidence before cleanup."""
     pipeline = load_pipeline_fixture(pipeline_fixture)
-    reason = pipeline_blocker(pipeline)
+    worker_policy_available = ExecutionPolicy.from_environment().ready()
+    reason = pipeline_blocker(
+        pipeline, isolated_repl_available=worker_policy_available,
+    )
     model = getattr(test_runner.llm_client, "model", "unknown")
     provider = type(test_runner.llm_client).__name__.lower()
     if reason:

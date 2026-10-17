@@ -34,10 +34,8 @@ def _action(tool, args):
     })
 
 
-def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
-    from tools.external_tools import reset_repl_globals
-
-    reset_repl_globals()
+def build_scripted_saga_fixture():
+    """One immutable synthetic saga for testing both host and container engines."""
     pipeline_path = os.path.join(
         os.path.dirname(__file__), "..", "data", "distributed_saga_recovery_pipeline.json"
     )
@@ -156,6 +154,7 @@ def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
         "Services: " + ", ".join(service_graph),
         "Orders: ORD-2001 $125.50, ORD-2002 $80.00, ORD-2003 $240.75, ORD-2004 $19.99, ORD-2005 $510.25.",
         "Canonical event count: 26. Successful orders: 4. Cancelled orders: 1.",
+        "Canonical ledger_root_hash: 19942b007f0e68af291042a85e157365874afcf80eec45ea2172474ad06fdec4.",
         "Independent hash-chain and business-invariant checks passed.",
         "Duplicate event EVT-2003-PAYMENT-FAIL was suppressed idempotently.",
         "Compensation actions: INVENTORY_RELEASE and ORDER_CANCELLED.",
@@ -175,6 +174,15 @@ def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
         _action('write_file', {'path': 'saga_execution_report.md', 'content': report_content}),
         json.dumps({'thought': 'step eight complete', 'action': None, 'final_answer': 'final report complete'}),
     ]
+
+    return pipeline, responses, service_graph
+
+
+def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
+    from tools.external_tools import reset_repl_globals
+
+    reset_repl_globals()
+    pipeline, responses, service_graph = build_scripted_saga_fixture()
 
     orig_ws = tools.file_tools.WORKSPACE_DIR
     try:

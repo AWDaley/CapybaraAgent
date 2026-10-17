@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from tal.safe_paths import resolve_workspace_path
 
@@ -60,12 +60,15 @@ def _plain_snapshot(value: Any, depth: int = 0) -> Any:
 def collect_benchmark_evidence(
     workspace_dir: str, state_keys: tuple[str, ...],
     artifact_paths: tuple[str, ...],
+    state_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     """Capture selected evidence BEFORE sandbox cleanup, with strict size limits."""
-    from tools.external_tools import get_repl_globals
+    if state_provider is None:
+        from tools.external_tools import get_repl_globals
+        state_provider = get_repl_globals
 
     observed_state: dict[str, Any] = {}
-    globals_dict = get_repl_globals()
+    globals_dict = state_provider()
     for key in state_keys[:16]:
         if not isinstance(key, str) or not key.isidentifier() or key not in globals_dict:
             continue
