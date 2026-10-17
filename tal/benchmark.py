@@ -382,7 +382,12 @@ class SLMBenchmarkRunner:
             suite_fingerprint=suite.fingerprint,
             model=model,
             provider=self.test_runner.llm_client.__class__.__name__.replace("Provider", "").replace("Client", "").lower(),
-            mode=self.test_runner.mode,
+            mode=(
+                "mixed" if any(case.pipeline_fixture for case in suite.cases)
+                and any(not case.pipeline_fixture for case in suite.cases)
+                else "pipeline" if all(case.pipeline_fixture for case in suite.cases)
+                else self.test_runner.mode
+            ),
             seed=seed,
             repetitions=repetitions,
         )
