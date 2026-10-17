@@ -8,6 +8,7 @@ or run shutdown. No Docker socket, home directory or host network is mounted.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import queue
@@ -194,8 +195,18 @@ class StatefulSandbox:
     def execute_tool(self, args: str) -> str:
         """ToolResult-compatible string. Never executes the code on host."""
         try:
-            data = json.loads(args)
-            code = data.get("code") if isinstance(data, dict) else None
+            if not isinstance(args, str) or len(args.encode("utf-8")) > _MAX_CODE + 4096:
+                raise ValueError("WORKER_ARGUMENTS_TOO_LARGE")
+            try:
+                data = json.loads(args)
+            except json.JSONDecodeError:
+                # The historical no-TAL parser renders {"code": ...} as a
+                # Python dict repr. ast.literal_eval parses ONLY literals;
+                # never eval or exec model code in the host process.
+                data = ast.literal_eval(args)
+            if type(data) is not dict or set(data) != {"code"}:
+                raise ValueError("WORKER_ARGUMENTS_INVALID")
+            code = data.get("code")
             if not isinstance(code, str) or not 0 < len(code.encode("utf-8")) <= _MAX_CODE:
                 raise ValueError("WORKER_CODE_INVALID")
             result = self._exchange("exec", code=code)

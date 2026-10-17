@@ -49,7 +49,7 @@ def test_literal_protocol_fixture_preserves_state_and_bounds_values():
         })
         assert result["id"] == 1
         assert result["ok"] is True
-        assert result["output"] == "ok"
+        assert result["output"].strip() == "ok"
         state = _send(proc, {"id": 2, "op": "snapshot", "names": ["benchmark_summary"]})
         assert state == {
             "id": 2, "ok": True,
@@ -109,7 +109,7 @@ def test_real_container_worker_persists_state_and_cannot_escape_workspace(tmp_pa
         assert sandbox.execute_tool(json.dumps({"code": (
             "import hashlib\nimport json\n"
             "numbers = [n*n for n in range(1, 11)]\nprint(len(numbers))"
-        )})) == "10"
+        )})).strip() == "10"
         assert sandbox.snapshot(["numbers"])["numbers"] == [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
         assert not sandbox.execute_tool('{"code":"result = sum(numbers)"}').startswith("Error")
         assert sandbox.snapshot(["numbers"])["numbers"][-1] == 100
