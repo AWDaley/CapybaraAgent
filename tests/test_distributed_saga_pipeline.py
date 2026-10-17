@@ -154,6 +154,7 @@ def build_scripted_saga_fixture():
         "Services: " + ", ".join(service_graph),
         "Orders: ORD-2001 $125.50, ORD-2002 $80.00, ORD-2003 $240.75, ORD-2004 $19.99, ORD-2005 $510.25.",
         "Canonical event count: 26. Successful orders: 4. Cancelled orders: 1.",
+        "Canonical ledger_root_hash: 19942b007f0e68af291042a85e157365874afcf80eec45ea2172474ad06fdec4.",
         "Independent hash-chain and business-invariant checks passed.",
         "Duplicate event EVT-2003-PAYMENT-FAIL was suppressed idempotently.",
         "Compensation actions: INVENTORY_RELEASE and ORDER_CANCELLED.",
