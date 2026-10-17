@@ -12,7 +12,6 @@ import io
 import json
 import math
 import sys
-import traceback
 
 _MAX_REQUEST_BYTES = 65_536
 _MAX_REPLY_BYTES = 256 * 1024
@@ -123,6 +122,7 @@ def _process(request: dict) -> dict:
 def main() -> None:
     _send({"id": 0, "ok": True, "output": "ready"})
     while True:
+        request = None
         line = sys.__stdin__.buffer.readline(_MAX_REQUEST_BYTES + 1)
         if not line:
             return

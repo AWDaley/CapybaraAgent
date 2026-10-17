@@ -35,14 +35,23 @@ def _reply_reader(pipe, pending: queue.Queue) -> None:
         while True:
             raw = pipe.readline(_MAX_FRAME + 1)
             if not raw:
-                pending.put(None)
+                frame = None
+            elif len(raw) > _MAX_FRAME or not raw.endswith(b"\n"):
+                frame = StatefulSandboxError("WORKER_FRAME_INVALID")
+            else:
+                frame = raw
+            try:
+                pending.put(frame, timeout=1)
+            except queue.Full:
+                # Do not store unbounded, attacker-controlled stdout.
                 return
-            if len(raw) > _MAX_FRAME or not raw.endswith(b"\n"):
-                pending.put(StatefulSandboxError("WORKER_FRAME_INVALID"))
+            if frame is None or isinstance(frame, Exception):
                 return
-            pending.put(raw)
     except OSError:
-        pending.put(None)
+        try:
+            pending.put(None, timeout=1)
+        except queue.Full:
+            pass
 
 
 def _stderr_reader(pipe, output: bytearray) -> None:

@@ -145,7 +145,7 @@ def _requires_stateful_repl(pipeline: StructuredPipeline) -> bool:
 def _snapshot_names(pipeline: StructuredPipeline, additional: tuple[str, ...] = ()) -> tuple[str, ...]:
     """Allowlisted REPL exports; never expose the worker's entire interpreter."""
     names: set[str] = set(additional)
-    pattern = re.compile(r"\\$eval:([a-zA-Z_][a-zA-Z_0-9]*)")
+    pattern = re.compile(r"\$eval:([a-zA-Z_][a-zA-Z_0-9]*)")
 
     def scan(value: Any) -> None:
         if isinstance(value, str):
