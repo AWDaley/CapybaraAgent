@@ -1,0 +1,44 @@
+name: Stateful worker container integration
+
+on:
+  push:
+    paths:
+      - "execution/**"
+      - "tal/pipeline_benchmark.py"
+      - "tal/benchmark_evidence.py"
+      - "data/benchmark_isolated_stateful_pipeline.json"
+      - "tests/test_stateful_worker.py"
+      - ".github/workflows/stateful-container.yml"
+  pull_request:
+    paths:
+      - "execution/**"
+      - "tal/pipeline_benchmark.py"
+      - "tal/benchmark_evidence.py"
+      - "data/benchmark_isolated_stateful_pipeline.json"
+      - "tests/test_stateful_worker.py"
+      - ".github/workflows/stateful-container.yml"
+
+jobs:
+  isolated-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Resolve test Python image to immutable registry digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull python:3.12-slim
+          resolved="$(docker image inspect --format '{{index .RepoDigests 0}}' python:3.12-slim)"
+          [[ "$resolved" =~ @sha256:[0-9a-f]{64}$ ]]
+          echo "CAPYBARA_SANDBOX_IMAGE=$resolved" >> "$GITHUB_ENV"
+          echo "CAPYBARA_CONTAINER_RUNTIME=docker" >> "$GITHUB_ENV"
+          echo "CAPYBARA_RUN_CONTAINER_TESTS=1" >> "$GITHUB_ENV"
+      - name: Run actual isolated container protocol and pipeline smoke tests
+        run: python -m pytest tests/test_stateful_worker.py -q
