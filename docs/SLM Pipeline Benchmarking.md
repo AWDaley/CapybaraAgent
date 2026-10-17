@@ -3,7 +3,9 @@
 Use `benchmarks/slm_v3.json` for task suites with fixed structured pipelines.
 The `pipeline_fixture` field is a checked-in `data/<basename>.json` path.
 The evaluator does **not** permit model-generated pipeline definitions or
-arbitrary absolute/local paths. The same pipeline graph, tool registry, and
+arbitrary absolute/local paths. Every trial records the SHA-256 of the exact
+fixed workflow file as `pipeline_sha256`, so fixture changes remain visible
+even if suite metadata has not been updated. The same pipeline graph, tool registry, and
 independent acceptance checks run in both the baseline and TAL arms.
 
 The pipeline runner permits only local, deterministic tools

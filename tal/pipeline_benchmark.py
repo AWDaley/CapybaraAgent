@@ -8,6 +8,7 @@ recorded as UNAVAILABLE (and excluded from the score denominator).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import re
@@ -35,15 +36,25 @@ _ALLOWED_OUTPUT_SPECS = frozenset({"text", "raw", "template"})
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def load_pipeline_fixture(reference: str) -> StructuredPipeline:
-    """Resolve a named, checked-in fixture; reject arbitrary filesystem paths."""
+def _fixture_path(reference: str) -> Path:
+    """Resolve a bounded checked-in fixture without any arbitrary path fallback."""
     if not isinstance(reference, str) or not re.fullmatch(r"data/[a-z0-9_-]+\.json", reference):
         raise ValueError("Pipeline benchmark fixture must be inside data/*.json")
     root = (_PROJECT_ROOT / "data").resolve()
     target = (_PROJECT_ROOT / reference).resolve()
     if target.parent != root or not target.is_file() or target.stat().st_size > 512 * 1024:
         raise ValueError("Pipeline benchmark fixture must be a local, bounded data/*.json file")
-    with target.open(encoding="utf-8") as stream:
+    return target
+
+
+def pipeline_fixture_digest(reference: str) -> str:
+    """Record the actual fixed workflow bytes separately from suite metadata."""
+    return hashlib.sha256(_fixture_path(reference).read_bytes()).hexdigest()
+
+
+def load_pipeline_fixture(reference: str) -> StructuredPipeline:
+    """Parse the same checked-in pipeline for both experimental arms."""
+    with _fixture_path(reference).open(encoding="utf-8") as stream:
         payload = json.load(stream)
     return StructuredPipeline.from_dict(payload)
 

@@ -247,6 +247,7 @@ class BenchmarkTrial:
     result: TALTestResult
     baseline_oracle_passed: bool | None = None
     tal_oracle_passed: bool | None = None
+    pipeline_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -258,6 +259,7 @@ class BenchmarkTrial:
             "result": self.result.to_dict(),
             "baseline_oracle_passed": self.baseline_oracle_passed,
             "tal_oracle_passed": self.tal_oracle_passed,
+            "pipeline_sha256": self.pipeline_sha256,
         }
 
 
@@ -400,6 +402,8 @@ class SLMBenchmarkRunner:
                 else ()
             )
             if case.pipeline_fixture:
+                from tal.pipeline_benchmark import pipeline_fixture_digest
+
                 result = self.test_runner.run_pipeline_test(
                     case.prompt, pipeline_fixture=case.pipeline_fixture,
                     seed=trial_seed, evidence_keys=evidence_keys, artifact_paths=artifact_paths,
@@ -422,6 +426,10 @@ class SLMBenchmarkRunner:
                 ),
                 tal_oracle_passed=(
                     case.oracle.evaluate(result.tal) if case.oracle and eligible else None
+                ),
+                pipeline_sha256=(
+                    pipeline_fixture_digest(case.pipeline_fixture)
+                    if case.pipeline_fixture else None
                 ),
             ))
         return scorecard

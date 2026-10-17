@@ -99,6 +99,9 @@ def test_v3_suite_routes_only_saga_through_fixed_pipeline(tmp_path):
     ).run(two_case_suite, repetitions=1, seed=13)
     assert scorecard.mode == "pipeline"
     trials = {trial.case_id: trial for trial in scorecard.trials}
+    assert len(trials["fixed_pipeline_harness_smoke"].pipeline_sha256) == 64
+    assert len(trials["distributed_saga_recovery"].pipeline_sha256) == 64
+    assert trials["fixed_pipeline_harness_smoke"].pipeline_sha256 != trials["distributed_saga_recovery"].pipeline_sha256
     assert trials["fixed_pipeline_harness_smoke"].baseline_oracle_passed is True
     assert trials["fixed_pipeline_harness_smoke"].tal_oracle_passed is True
     assert trials["distributed_saga_recovery"].baseline_oracle_passed is None
