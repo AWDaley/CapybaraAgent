@@ -31,6 +31,8 @@ class RunMetrics:
     verification_passed: bool | None = None
     verification_messages: list[str] = field(default_factory=list)
     outcome: str = "completed_unverified"
+    execution_supported: bool = True
+    unsupported_reason: str | None = None
     events_count: int = 0
     observed_state: dict[str, Any] = field(default_factory=dict)
     observed_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)

@@ -144,6 +144,7 @@ class BenchmarkCase:
     acceptance: str = ""
     tags: tuple[str, ...] = ()
     oracle: AcceptanceOracle | None = None
+    pipeline_fixture: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BenchmarkCase":
@@ -157,6 +158,12 @@ class BenchmarkCase:
         raw_tags = data.get("tags", [])
         if not isinstance(raw_tags, list) or not all(isinstance(tag, str) and tag.strip() for tag in raw_tags):
             raise ValueError("Benchmark case tags must be a list of non-empty strings")
+        fixture = data.get("pipeline_fixture")
+        if fixture is not None and (
+            not isinstance(fixture, str)
+            or not re.fullmatch(r"data/[a-z0-9_-]+\.json", fixture)
+        ):
+            raise ValueError("pipeline_fixture must be a repository data/*.json fixture")
         return cls(
             case_id=str(data["case_id"]),
             category=str(data["category"]),
@@ -165,6 +172,7 @@ class BenchmarkCase:
             acceptance=str(data.get("acceptance", "")),
             tags=tuple(raw_tags),
             oracle=AcceptanceOracle.from_dict(data["oracle"]) if "oracle" in data else None,
+            pipeline_fixture=fixture,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -174,6 +182,8 @@ class BenchmarkCase:
             data.pop("oracle")
         else:
             data["oracle"] = self.oracle.to_dict()
+        if self.pipeline_fixture is None:
+            data.pop("pipeline_fixture")
         return data
 
 
@@ -279,12 +289,17 @@ class BenchmarkScorecard:
                 if item.tal_oracle_passed is not None
             ]
             scorable = len(tal_success)
+            unsupported = sum(
+                not item.result.baseline.execution_supported or not item.result.tal.execution_supported
+                for item in items
+            )
             total_tool_calls = sum(item.result.tal.tool_call_count for item in items)
             total_tool_errors = sum(item.result.tal.tool_error_count for item in items)
             return {
                 "trials": len(items),
                 "scored_trials": scorable,
                 "unscored_trials": len(items) - scorable,
+                "unsupported_trials": unsupported,
                 "oracle_coverage": round(scorable / len(items), 4) if items else 0.0,
                 # Never silently count a prose-only acceptance description as a
                 # machine-verified failure (or a machine-verified success).
@@ -373,15 +388,23 @@ class SLMBenchmarkRunner:
         )
         for case, repetition in trials:
             trial_seed = rng.randrange(2**32) if seed is not None else None
-            result = self.test_runner.run_single_test(
-                case.prompt, seed=trial_seed,
-                evidence_keys=tuple(case.oracle.state_equals) if case.oracle else (),
-                artifact_paths=(
-                    ("saga_execution_audit.json", "saga_release_manifest.json", "saga_execution_report.md")
-                    if case.oracle and case.oracle.artifact_verifier == "distributed_saga_v1"
-                    else ()
-                ),
+            evidence_keys = tuple(case.oracle.state_equals) if case.oracle else ()
+            artifact_paths = (
+                ("saga_execution_audit.json", "saga_release_manifest.json", "saga_execution_report.md")
+                if case.oracle and case.oracle.artifact_verifier == "distributed_saga_v1"
+                else ()
             )
+            if case.pipeline_fixture:
+                result = self.test_runner.run_pipeline_test(
+                    case.prompt, pipeline_fixture=case.pipeline_fixture,
+                    seed=trial_seed, evidence_keys=evidence_keys, artifact_paths=artifact_paths,
+                )
+            else:
+                result = self.test_runner.run_single_test(
+                    case.prompt, seed=trial_seed,
+                    evidence_keys=evidence_keys, artifact_paths=artifact_paths,
+                )
+            eligible = result.baseline.execution_supported and result.tal.execution_supported
             scorecard.trials.append(BenchmarkTrial(
                 case_id=case.case_id,
                 category=case.category,
@@ -390,10 +413,10 @@ class SLMBenchmarkRunner:
                 seed=trial_seed,
                 result=result,
                 baseline_oracle_passed=(
-                    case.oracle.evaluate(result.baseline) if case.oracle else None
+                    case.oracle.evaluate(result.baseline) if case.oracle and eligible else None
                 ),
                 tal_oracle_passed=(
-                    case.oracle.evaluate(result.tal) if case.oracle else None
+                    case.oracle.evaluate(result.tal) if case.oracle and eligible else None
                 ),
             ))
         return scorecard

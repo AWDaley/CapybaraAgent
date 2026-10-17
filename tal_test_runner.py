@@ -391,6 +391,22 @@ class TALTestRunner:
 
         return result
 
+    def run_pipeline_test(
+        self,
+        prompt: str,
+        pipeline_fixture: str,
+        seed: int | None = None,
+        evidence_keys: tuple[str, ...] = (),
+        artifact_paths: tuple[str, ...] = (),
+    ) -> TALTestResult:
+        """Run both arms through the SAME fixed pipeline, never ReAct fallback."""
+        from tal.pipeline_benchmark import run_pipeline_pair
+
+        return run_pipeline_pair(
+            self, prompt, pipeline_fixture,
+            seed=seed, evidence_keys=evidence_keys, artifact_paths=artifact_paths,
+        )
+
     def run_batch_test(
         self,
         prompts: list[str],
