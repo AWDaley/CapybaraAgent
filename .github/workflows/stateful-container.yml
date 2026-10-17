@@ -8,6 +8,9 @@ on:
       - "tal/benchmark_evidence.py"
       - "data/benchmark_isolated_stateful_pipeline.json"
       - "tests/test_stateful_worker.py"
+      - "tests/test_distributed_saga_pipeline.py"
+      - "data/distributed_saga_recovery_pipeline.json"
+      - "tal/pipeline_runner.py"
       - ".github/workflows/stateful-container.yml"
   pull_request:
     paths:
@@ -16,6 +19,9 @@ on:
       - "tal/benchmark_evidence.py"
       - "data/benchmark_isolated_stateful_pipeline.json"
       - "tests/test_stateful_worker.py"
+      - "tests/test_distributed_saga_pipeline.py"
+      - "data/distributed_saga_recovery_pipeline.json"
+      - "tal/pipeline_runner.py"
       - ".github/workflows/stateful-container.yml"
 
 jobs:

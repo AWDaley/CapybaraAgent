@@ -68,3 +68,13 @@ python -m pytest
 CI tests on Linux and Windows with Python 3.10, 3.11, and 3.12. These checks
 do not replace sandbox penetration testing, real LLM benchmarking, Android
 device verification, or multi-user deployment hardening.
+
+
+## Phase 6 addendum: isolated stateful benchmark worker
+
+The historical stateless container notes above remain accurate for the
+`run_command` tool. Fixed-pipeline benchmark runs can additionally use a
+separate, persistent **OS-contained** Python worker if a reviewed,
+digest-pinned image and runtime are configured. The ordinary browser and CLI
+entrypoints still disable model-directed stateful REPL execution in safe
+mode. See [stateful worker deployment](STATEFUL_CONTAINER_WORKER.md).
