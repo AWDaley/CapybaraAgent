@@ -1,0 +1,56 @@
+{
+  "pipeline_id": "benchmark_fixed_offline_pipeline_v1",
+  "title": "Two-step fixed offline harness",
+  "global_context": {
+    "purpose": "Exercise fixed pipeline routing without model or host execution"
+  },
+  "max_steps": 10,
+  "max_time_seconds": 60,
+  "pipeline": [
+    {
+      "step_id": "publish_receipt",
+      "specialist": "harness",
+      "objective": "Materialize a deterministic JSON receipt",
+      "output_spec": {
+        "spec_type": "template",
+        "target_file": "receipt.json",
+        "template": {
+          "status": "ready",
+          "value": 42
+        }
+      },
+      "verification_criteria": [
+        {
+          "type": "json_schema",
+          "path": "receipt.json",
+          "required_keys": [
+            "status",
+            "value"
+          ],
+          "min_size": 10
+        }
+      ],
+      "max_retries": 0,
+      "max_steps": 1
+    },
+    {
+      "step_id": "publish_proof",
+      "specialist": "harness",
+      "objective": "Produce a deterministic text proof",
+      "output_spec": {
+        "spec_type": "text",
+        "target_file": "proof.txt",
+        "template": "This reproducible harness step produced receipt.json with expected value 42; verification is independent."
+      },
+      "verification_criteria": [
+        {
+          "type": "file_exists",
+          "path": "proof.txt",
+          "min_size": 40
+        }
+      ],
+      "max_retries": 0,
+      "max_steps": 1
+    }
+  ]
+}

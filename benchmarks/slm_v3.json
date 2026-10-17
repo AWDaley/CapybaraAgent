@@ -1,0 +1,118 @@
+{
+  "suite_id": "capybara_slm_core",
+  "version": "v3",
+  "description": "Paired SLM benchmarks with a pinned fixed-pipeline execution path, independent oracles, and explicit unsupported-capability reporting.",
+  "cases": [
+    {
+      "case_id": "deterministic_calculation",
+      "category": "tool_use",
+      "difficulty": "easy",
+      "prompt": "Use the calculator tool to compute (184 * 37) - 95. State the result.",
+      "acceptance": "The final answer contains the exact calculated value.",
+      "tags": [
+        "calculator",
+        "structured_action"
+      ],
+      "oracle": {
+        "final_contains_all": [
+          "6713"
+        ],
+        "tool_observations": [
+          {
+            "tool": "calc",
+            "contains": "6713"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "verified_python_state",
+      "category": "structured_state",
+      "difficulty": "medium",
+      "prompt": "Use python_repl to create a list named benchmark_numbers containing the squares of 1 through 10, then report its length and final value.",
+      "acceptance": "The REPL state contains ten deterministic values and the response reports the expected length and final value.",
+      "tags": [
+        "python_repl",
+        "state",
+        "verification"
+      ],
+      "oracle": {
+        "state_equals": {
+          "benchmark_numbers": [
+            1,
+            4,
+            9,
+            16,
+            25,
+            36,
+            49,
+            64,
+            81,
+            100
+          ]
+        },
+        "final_contains_all": [
+          "10",
+          "100"
+        ]
+      }
+    },
+    {
+      "case_id": "diagnostic_repair",
+      "category": "recovery",
+      "difficulty": "hard",
+      "prompt": "Use python_repl to transform the numeric inputs [2, 4, 6, 8] into a dictionary named benchmark_summary with exact keys total and average, whose numeric values must be 20 and 5.0. Verify the result and repair any syntax or schema error before completing.",
+      "acceptance": "The actual REPL variable benchmark_summary equals {'total': 20, 'average': 5.0}, independently of final text.",
+      "tags": [
+        "repair",
+        "schema",
+        "python_repl"
+      ],
+      "oracle": {
+        "state_equals": {
+          "benchmark_summary": {
+            "total": 20,
+            "average": 5
+          }
+        }
+      }
+    },
+    {
+      "case_id": "distributed_saga_recovery",
+      "category": "long_horizon_pipeline",
+      "difficulty": "endurance",
+      "prompt": "Execute the distributed order saga in data/distributed_saga_recovery_pipeline.json, preserving canonical state, suppressing duplicate failed-payment events and emitting saga_execution_audit.json, saga_release_manifest.json and saga_execution_report.md. This is an endurance task requiring an execution backend with the declared capabilities.",
+      "acceptance": "Run both arms over the same checked-in typed saga pipeline when an approved isolated stateful REPL worker is available, then independently inspect its artifacts; otherwise mark the trial unsupported, not failed.",
+      "tags": [
+        "pipeline",
+        "checkpoint",
+        "recovery",
+        "regression"
+      ],
+      "oracle": {
+        "artifact_verifier": "distributed_saga_v1"
+      },
+      "pipeline_fixture": "data/distributed_saga_recovery_pipeline.json"
+    },
+    {
+      "case_id": "fixed_pipeline_harness_smoke",
+      "category": "pipeline_execution",
+      "difficulty": "easy",
+      "prompt": "Run the checked-in, deterministic two-step offline pipeline without model-generated stages, and verify both artifacts.",
+      "acceptance": "Both fixed harness steps complete and produce fresh receipt.json and proof.txt artifacts with checked content.",
+      "tags": [
+        "pipeline",
+        "harness",
+        "offline",
+        "parity"
+      ],
+      "pipeline_fixture": "data/benchmark_safe_pipeline.json",
+      "oracle": {
+        "final_contains_all": [
+          "receipt.json",
+          "proof.txt"
+        ]
+      }
+    }
+  ]
+}
