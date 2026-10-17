@@ -195,6 +195,20 @@ def govern_agent_tools(registry: dict) -> dict:
             continue
         if name == "run_command" and runner.policy.ready():
             tools[name] = runner.run_command
+        elif name == "python_repl":
+            # Only the exact bound method of a live, OS-backed sandbox may
+            # survive tool governance. An arbitrary callable named
+            # "python_repl" remains prohibited even with a valid image.
+            from execution.stateful import StatefulSandbox
+
+            tool = tools[name]
+            owner = getattr(tool, "__self__", None)
+            if not (
+                isinstance(owner, StatefulSandbox)
+                and getattr(tool, "__func__", None) is StatefulSandbox.execute_tool
+                and owner.ready
+            ):
+                tools.pop(name)
         else:
             tools.pop(name)
     return tools
