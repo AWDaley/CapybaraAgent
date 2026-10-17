@@ -198,3 +198,56 @@ def test_isolated_stateful_pipeline_same_fixture_runs_both_arms(tmp_path):
             "total": 20, "average": 5.0,
         }
     assert client.calls == 2
+
+
+@pytest.mark.skipif(
+    os.environ.get("CAPYBARA_RUN_CONTAINER_TESTS") != "1",
+    reason="Complete saga integration requires an approved digest-pinned container",
+)
+def test_real_container_runs_all_eight_saga_steps_with_independent_oracle(tmp_path):
+    """End-to-end synthetic scripted saga through actual Docker, NOT a live SLM."""
+    from llm_client import LLMClient
+    from tal.benchmark_evidence import verify_distributed_saga
+    from test_distributed_saga_pipeline import build_scripted_saga_fixture
+
+    _pipeline, responses, _graph = build_scripted_saga_fixture()
+    class _TrustedSagaScript(LLMClient):
+        def __init__(self):
+            super().__init__(model="qwen3.5:4b")
+            self.calls = 0
+
+        def generate(self, messages, json_mode=False, timeout_seconds=None):
+            index = self.calls % len(responses)
+            self.calls += 1
+            return responses[index]
+
+        def generate_with_retry(self, messages, json_mode=False, max_retries=3,
+                                callback=None, deadline=None):
+            response = self.generate(messages, json_mode=json_mode)
+            if callback:
+                callback(response)
+            return response
+
+        @classmethod
+        def list_models(cls):
+            return []
+
+    scripted = _TrustedSagaScript()
+    runner = TALTestRunner(scripted, storage_dir=str(tmp_path), max_steps=70)
+    result = runner.run_pipeline_test(
+        "Perform eight-step synthetic distributed saga",
+        pipeline_fixture="data/distributed_saga_recovery_pipeline.json",
+        artifact_paths=(
+            "saga_execution_audit.json", "saga_release_manifest.json",
+            "saga_execution_report.md",
+        ),
+        seed=24,
+    )
+    for trial in (result.baseline, result.tal):
+        assert trial.execution_supported, trial.unsupported_reason
+        assert trial.success, trial.error
+        assert trial.verification_passed is True
+        assert verify_distributed_saga(trial.observed_artifacts), trial.final_answer[:1200]
+        assert trial.tool_error_count == 0
+        assert "saga_execution_audit.json" in trial.observed_artifacts
+    assert scripted.calls >= 16

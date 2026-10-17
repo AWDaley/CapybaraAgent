@@ -34,10 +34,8 @@ def _action(tool, args):
     })
 
 
-def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
-    from tools.external_tools import reset_repl_globals
-
-    reset_repl_globals()
+def build_scripted_saga_fixture():
+    """One immutable synthetic saga for testing both host and container engines."""
     pipeline_path = os.path.join(
         os.path.dirname(__file__), "..", "data", "distributed_saga_recovery_pipeline.json"
     )
@@ -175,6 +173,15 @@ def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
         _action('write_file', {'path': 'saga_execution_report.md', 'content': report_content}),
         json.dumps({'thought': 'step eight complete', 'action': None, 'final_answer': 'final report complete'}),
     ]
+
+    return pipeline, responses, service_graph
+
+
+def test_distributed_saga_pipeline_runs_all_steps_and_materializes_artifacts():
+    from tools.external_tools import reset_repl_globals
+
+    reset_repl_globals()
+    pipeline, responses, service_graph = build_scripted_saga_fixture()
 
     orig_ws = tools.file_tools.WORKSPACE_DIR
     try:
